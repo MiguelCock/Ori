@@ -147,6 +147,12 @@ class VoiceGuidanceService extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Método general para leer cualquier texto, independiente de la navegación
+  Future<void> speak(String text) async {
+    await _initTts();
+    await _speakAndAnnounce(text);
+  }
+
   Future<void> _onLocationChanged() async {
     if (!_isNavigating || _locationService?.currentLocation == null) return;
 

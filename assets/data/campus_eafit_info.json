@@ -1,0 +1,417 @@
+{
+  "places": {
+    "Paraqueadero sur": {
+      "building_type": "Parqueadero",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Parqueadero de Argos": {
+      "building_type": "Parqueadero",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Parqueadero de profesores, directivos y empleados": {
+      "building_type": "Parqueadero",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Parqueadero del Parque Los Guayabos": {
+      "building_type": "Parqueadero",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Parqueadero Norte": {
+      "building_type": "Parqueadero",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Bloque 1": {
+      "building_type": "Bloque académico",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Bloque 3": {
+      "building_type": "Bloque académico",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Bloque 7": {
+      "building_type": "Bloque académico",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Bloque 12": {
+      "building_type": "Bloque académico",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Bloque 13": {
+      "building_type": "Bloque académico",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Bloque 14": {
+      "building_type": "Bloque académico",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Bloque 15": {
+      "building_type": "Bloque académico",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Bloque 16": {
+      "building_type": "Bloque académico",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Bloque 17": {
+      "building_type": "Bloque académico",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Bloque 18": {
+      "building_type": "Bloque académico",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Bloque 19": {
+      "building_type": "Bloque académico",
+      "schedule": "6:00 a.m. - 9:00 p.m.",
+      "services": ["Aulas de pedagogía inversa", "Oficinas de maestros", "Salas de cómputo"],
+      "accessibility": "Ascensor",
+      "extended_description": ""
+    },
+    "Bloque 20": {
+      "building_type": "Bloque académico",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Bloque 21": {
+      "building_type": "Bloque académico",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Bloque 23": {
+      "building_type": "Bloque académico",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Bloque 26": {
+      "building_type": "Bloque académico",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Bloque 27": {
+      "building_type": "Bloque académico",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Bloque 28": {
+      "building_type": "Bloque académico",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Bloque 29": {
+      "building_type": "Bloque académico",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Bloque 30": {
+      "building_type": "Bloque académico",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Bloque 32": {
+      "building_type": "Bloque académico",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Bloque 33": {
+      "building_type": "Bloque académico",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Bloque 34": {
+      "building_type": "Bloque académico",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Bloque 35": {
+      "building_type": "Bloque académico",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Bloque 36": {
+      "building_type": "Bloque académico",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Bloque 37": {
+      "building_type": "Bloque académico",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Bloque 38": {
+      "building_type": "Bloque académico",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Bloque 39": {
+      "building_type": "Bloque académico",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Centro Argos para la Innovación en EAFIT": {
+      "building_type": "Centro de innovación",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Casas 1 y 2": {
+      "building_type": "Edificio administrativo",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Taller de metalmecánica": {
+      "building_type": "Taller",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Portería 1": {
+      "building_type": "Portería",
+      "schedule": "24 horas, 7 días a la semana",
+      "services": ["Control de acceso", "Información general"],
+      "accessibility": "Acceso peatonal y vehicular",
+      "extended_description": ""
+    },
+    "Portería 2": {
+      "building_type": "Portería",
+      "schedule": "24 horas, 7 días a la semana",
+      "services": ["Control de acceso", "Información general"],
+      "accessibility": "Acceso peatonal y vehicular",
+      "extended_description": ""
+    },
+    "Portería 3": {
+      "building_type": "Portería",
+      "schedule": "24 horas, 7 días a la semana",
+      "services": ["Control de acceso", "Información general"],
+      "accessibility": "Acceso peatonal y vehicular",
+      "extended_description": ""
+    },
+    "Portería 4": {
+      "building_type": "Portería",
+      "schedule": "24 horas, 7 días a la semana",
+      "services": ["Control de acceso", "Información general"],
+      "accessibility": "Acceso peatonal y vehicular",
+      "extended_description": ""
+    },
+    "Portería 5": {
+      "building_type": "Portería",
+      "schedule": "24 horas, 7 días a la semana",
+      "services": ["Control de acceso", "Información general"],
+      "accessibility": "Acceso peatonal y vehicular",
+      "extended_description": ""
+    },
+    "Portería 6": {
+      "building_type": "Portería",
+      "schedule": "24 horas, 7 días a la semana",
+      "services": ["Control de acceso", "Información general"],
+      "accessibility": "Acceso peatonal y vehicular",
+      "extended_description": ""
+    },
+    "Portería 7": {
+      "building_type": "Portería",
+      "schedule": "24 horas, 7 días a la semana",
+      "services": ["Control de acceso", "Información general"],
+      "accessibility": "Acceso peatonal y vehicular",
+      "extended_description": ""
+    },
+    "Portería 8": {
+      "building_type": "Portería",
+      "schedule": "24 horas, 7 días a la semana",
+      "services": ["Control de acceso", "Información general"],
+      "accessibility": "Acceso peatonal y vehicular",
+      "extended_description": ""
+    },
+    "Portería 9": {
+      "building_type": "Portería",
+      "schedule": "24 horas, 7 días a la semana",
+      "services": ["Control de acceso", "Información general"],
+      "accessibility": "Acceso peatonal y vehicular",
+      "extended_description": ""
+    },
+    "Portería 10": {
+      "building_type": "Portería",
+      "schedule": "24 horas, 7 días a la semana",
+      "services": ["Control de acceso", "Información general"],
+      "accessibility": "Acceso peatonal y vehicular",
+      "extended_description": ""
+    },
+    "Cancha norte": {
+      "building_type": "Instalación deportiva",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Cancha sintética": {
+      "building_type": "Instalación deportiva",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Gimnasio Vivo": {
+      "building_type": "Instalación deportiva",
+      "schedule": "6:00 a.m. - 9:00 p.m.",
+      "services": ["Plan de entrenamiento personalizado", "Acceso a máquinas", "Sauna", "Turco", "Banos con duchas"],
+      "accessibility": "Ascensor",
+      "extended_description": ""
+    },
+    "Piscina": {
+      "building_type": "Instalación deportiva",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Placa polideportiva": {
+      "building_type": "Instalación deportiva",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Placas polideportivas": {
+      "building_type": "Instalación deportiva",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Cafetería Central": {
+      "building_type": "Cafetería",
+      "schedule": "6:00 a.m. - 9:00 p.m.",
+      "services": ["Restaurantes", "Mesas con conexión eléctrica"],
+      "accessibility": "Ascensor",
+      "extended_description": ""
+    },
+    "Domo y jardin": {
+      "building_type": "Espacio recreativo",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Parque de la Ceiba": {
+      "building_type": "Espacio recreativo",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Parque Los Guayabos": {
+      "building_type": "Espacio recreativo",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Parque Los Pimientos": {
+      "building_type": "Espacio recreativo",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Plazoleta del Estudiante": {
+      "building_type": "Espacio recreativo",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Quioscos": {
+      "building_type": "Punto de venta",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    },
+    "Casa 9": {
+      "building_type": "Edificio administrativo",
+      "schedule": "",
+      "services": [],
+      "accessibility": "",
+      "extended_description": ""
+    }
+  }
+}

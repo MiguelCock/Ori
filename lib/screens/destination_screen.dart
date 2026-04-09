@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../services/geojson_service.dart';
 import '../services/location_service.dart';
 import '../models/campus_place.dart';
+import '../screens/place_detail_screen.dart';
 
 class DestinationScreen extends StatefulWidget {
   final String categoryName;
@@ -320,7 +321,26 @@ class _PlaceList extends StatelessWidget {
                   trailing: isSelected
                       ? const Icon(Icons.check_circle_rounded,
                           color: Color(0xFF1565C0), size: 22)
-                      : null,
+                      : Semantics(
+                          button: true,
+                          label: 'Ver información de ${place.name}',
+                          hint: 'Toca dos veces para escuchar los detalles de este lugar',
+                          child: IconButton(
+                            icon: const Icon(
+                              Icons.info_outline_rounded,
+                              color: Color(0xFF82B1FF),
+                              size: 22,
+                            ),
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute<void>(
+                                  builder: (_) => PlaceDetailScreen(place: place),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
                 ),
               ),
             );

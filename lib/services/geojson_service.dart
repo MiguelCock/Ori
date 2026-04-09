@@ -13,6 +13,7 @@ class GeoJsonService extends ChangeNotifier {
   Map<String, CategoryMeta> _categories = {};
   bool _isLoaded = false;
   List<List<List<double>>> _campusPerimeters = [];
+  Map<String, dynamic> _extendedInfo = {};
 
   List<CampusPlace> get places => _filtered;
   List<CampusPlace> get allPlaces => _all;
@@ -25,6 +26,15 @@ class GeoJsonService extends ChangeNotifier {
 
   Future<void> load() async {
     if (_isLoaded) return;
+    // Cargar info extendida
+    try {
+      final infoRaw =
+          await rootBundle.loadString('assets/data/campus_eafit_info.json');
+      final infoJson = jsonDecode(infoRaw) as Map<String, dynamic>;
+      _extendedInfo = infoJson['places'] as Map<String, dynamic>? ?? {};
+    } catch (e) {
+      debugPrint('Info extendida no disponible: $e');
+    }
     try {
       final categoriesRaw =
           await rootBundle.loadString('assets/data/campus_eafit_categories.json');
@@ -80,6 +90,9 @@ class GeoJsonService extends ChangeNotifier {
         if (seen.contains(key)) continue;
         seen.add(key);
 
+        // Buscar info extendida por nombre del lugar
+        final info = _extendedInfo[name] as Map<String, dynamic>? ?? {};
+
         loaded.add(CampusPlace(
           name: name,
           description: desc.isEmpty ? name : desc,
@@ -87,6 +100,11 @@ class GeoJsonService extends ChangeNotifier {
           longitude: lng,
           categories: validCategories,
           polygon: coords,
+          buildingType: (info['building_type'] ?? '').toString(),
+          schedule: (info['schedule'] ?? '').toString(),
+          services: _parseList(info['services']),
+          accessibilityInfo: (info['accessibility'] ?? '').toString(),
+          extendedDescription: (info['extended_description'] ?? '').toString(),
         ));
       }
 
@@ -211,5 +229,10 @@ class GeoJsonService extends ChangeNotifier {
 
     if (nearest == null || bestDistance > maxDistanceMeters) return null;
     return nearest.name;
+  }
+
+  List<String> _parseList(dynamic value) {
+  if (value is List) return value.map((e) => e.toString()).toList();
+  return const [];
   }
 }
