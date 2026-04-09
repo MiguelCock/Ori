@@ -11,6 +11,8 @@ import 'package:provider/provider.dart';
 import '../services/geojson_service.dart';
 import '../services/location_service.dart';
 
+import '../services/voice_guidance_service.dart';
+
 class NavigationMapScreen extends StatefulWidget {
   final String destinationName;
   final double startLat;
@@ -49,6 +51,7 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
   List<LatLng> _routePoints = [];
   List<_RouteStep> _routeSteps = [];
   double? _routeDistanceMeters;
+  double? _remainingDistanceMeters;
   DateTime _lastRouteUpdate = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastAnnouncedReroute = DateTime.fromMillisecondsSinceEpoch(0);
 
@@ -337,7 +340,14 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     final next = LatLng(here.latitude, here.longitude);
 
     if (!mounted) return;
-    setState(() => _currentUser = next);
+
+    final voice = VoiceGuidanceService();
+    final remaining = voice.getRemainingDistance(here.latitude, here.longitude);
+
+    setState(() {
+      _currentUser = next;
+      _remainingDistanceMeters = remaining > 0 ? remaining : _routeDistanceMeters;
+    });
 
     _recalculateRoute(newOrigin: next);
   }
@@ -508,41 +518,44 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Row(
-                        children: [
-                          Semantics(
-                            button: true,
-                            label: 'Volver',
-                            child: Material(
-                              color: const Color(0xCC1A237E),
-                              borderRadius: BorderRadius.circular(12),
-                              child: IconButton(
-                                onPressed: () => Navigator.of(context).pop(),
-                                icon: const Icon(Icons.arrow_back, color: Colors.white),
-                              ),
+                              children: [
+                                Expanded(
+                                  child: Semantics(
+                                    label: _remainingDistanceMeters == null
+                                        ? 'Distancia restante no disponible'
+                                        : 'Distancia restante: ${_formatDistance(_remainingDistanceMeters!)}',
+                                    child: _MetricChip(
+                                      icon: Icons.straighten_rounded,
+                                      label: 'Distancia restante',
+                                      value: _remainingDistanceMeters == null
+                                          ? '--'
+                                          : _formatDistance(_remainingDistanceMeters!),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                              decoration: BoxDecoration(
-                                color: const Color(0xCC0D1B2A),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: Colors.white24),
-                              ),
-                              child: Text(
-                                widget.destinationName,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w600,
+                            const SizedBox(height: 8),
+                            Semantics(
+                              button: true,
+                              label: 'Escuchar distancia restante',
+                              hint: 'Toca dos veces para escuchar cuánto falta para llegar',
+                              child: SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  onPressed: () => VoiceGuidanceService().announceRemainingDistance(),
+                                  icon: const Icon(Icons.record_voice_over_rounded, size: 18),
+                                  label: const Text('¿Cuánto falta?'),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: Colors.white,
+                                    side: const BorderSide(color: Color(0xFF82B1FF)),
+                                    padding: const EdgeInsets.symmetric(vertical: 10),
+                                    textStyle: const TextStyle(fontSize: 13),
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                        ],
-                      ),
+                            const SizedBox(height: 14),
                       const SizedBox(height: 12),
                       Container(
                         padding: const EdgeInsets.all(14),

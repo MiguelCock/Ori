@@ -153,6 +153,60 @@ class VoiceGuidanceService extends ChangeNotifier {
     await _speakAndAnnounce(text);
   }
 
+  // Calcula la distancia restante nodo a nodo desde la posición actual
+  double getRemainingDistance(double currentLat, double currentLng) {
+    // Si no está navegando o ya terminó, retorna 0
+    if (!_isNavigating || _currentStepIndex >= _steps.length) return 0;
+
+    double total = 0;
+
+    // Primero: distancia desde donde estoy hasta el próximo punto de guía
+    total += _haversineMeters(
+      currentLat,
+      currentLng,
+      _steps[_currentStepIndex].endPoint.latitude,
+      _steps[_currentStepIndex].endPoint.longitude,
+    );
+
+    // Luego: suma todos los segmentos que faltan después de ese punto
+    for (int i = _currentStepIndex + 1; i < _steps.length; i++) {
+      total += _haversineMeters(
+        _steps[i - 1].endPoint.latitude,
+        _steps[i - 1].endPoint.longitude,
+        _steps[i].endPoint.latitude,
+        _steps[i].endPoint.longitude,
+      );
+    }
+
+    return total;
+  }
+
+  // El usuario puede pedir la distancia restante en cualquier momento
+  Future<void> announceRemainingDistance() async {
+    final loc = _locationService?.currentLocation;
+
+    if (!_isNavigating) {
+      await _speakAndAnnounce('No hay una navegación activa en este momento.');
+      return;
+    }
+
+    if (loc == null) {
+      await _speakAndAnnounce('No se puede calcular la distancia, el GPS no está disponible.');
+      return;
+    }
+
+    final meters = getRemainingDistance(loc.latitude, loc.longitude);
+
+    // Formato legible según la distancia
+    final text = meters >= 1000
+        ? 'Te faltan ${(meters / 1000).toStringAsFixed(1)} kilómetros para llegar a $_destinationName.'
+        : 'Te faltan ${meters.round()} metros para llegar a $_destinationName.';
+
+    await _speakAndAnnounce(text);
+  }
+
+
+
   Future<void> _onLocationChanged() async {
     if (!_isNavigating || _locationService?.currentLocation == null) return;
 

@@ -257,8 +257,16 @@ class _PlaceList extends StatelessWidget {
                 : 'Opción ${i + 1} de ${places.length}: ${place.name}${distText.isNotEmpty ? ", $distText" : ""}',
               hint: isSelected
                   ? 'Ya seleccionado. Toca Confirmar para continuar'
-                  : 'Toca dos veces para seleccionar',
+                  : 'Toca dos veces para seleccionar. Mantén presionado para escuchar información del lugar',
               onTap: () => onTap(place),
+              onLongPress: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => PlaceDetailScreen(place: place),
+                  ),
+                );
+              },
               child: Container(
                 margin: const EdgeInsets.only(bottom: 8),
                 decoration: BoxDecoration(
