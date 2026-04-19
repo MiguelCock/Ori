@@ -51,7 +51,7 @@ jobs:
           VERSION=$(grep 'version:' pubspec.yaml | head -1 | awk '{print $2}')
           BRANCH=${GITHUB_REF##*/}
           mv build/app/outputs/flutter-apk/app-debug.apk \
-             build/app/outputs/flutter-apk/campus-guia-${BRANCH}-v${VERSION}-build${{ github.run_number }}.apk
+             build/app/outputs/flutter-apk/campus-guia-debug-${BRANCH}-v${VERSION}-build${{ github.run_number }}.apk
 
       # 7. Subir APK como artefacto del workflow (disponible 14 días)
       #    Para descargarlo: GitHub → Actions → este workflow → pestaña Artifacts
