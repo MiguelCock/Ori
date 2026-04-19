@@ -104,7 +104,12 @@ class VoiceGuidanceService extends ChangeNotifier {
     _activePolyline = List<RoutePoint>.from(route.polyline);
     _steps
       ..clear()
-      ..addAll(_buildSteps(_activePolyline));
+      ..addAll(
+        _buildSteps(
+          _activePolyline,
+          initialHeadingDegrees: _locationService?.currentLocation?.heading,
+        ),
+      );
 
     if (_steps.isEmpty) {
       _status = 'No hay suficientes puntos para guiar por voz.';
@@ -235,7 +240,12 @@ class VoiceGuidanceService extends ChangeNotifier {
     _activePolyline = List<RoutePoint>.from(updated.polyline);
     _steps
       ..clear()
-      ..addAll(_buildSteps(_activePolyline));
+      ..addAll(
+        _buildSteps(
+          _activePolyline,
+          initialHeadingDegrees: _locationService?.currentLocation?.heading,
+        ),
+      );
     _currentStepIndex = 0;
     _currentInstruction = _steps.first.instruction;
     _status = 'Ruta actualizada hacia $_destinationName';
@@ -244,7 +254,10 @@ class VoiceGuidanceService extends ChangeNotifier {
     await _speakAndAnnounce('Ruta actualizada. ${_steps.first.instruction}');
   }
 
-  List<GuidanceStep> _buildSteps(List<RoutePoint> polyline) {
+  List<GuidanceStep> _buildSteps(
+    List<RoutePoint> polyline, {
+    double? initialHeadingDegrees,
+  }) {
     if (polyline.length < 2) return [];
 
     final steps = <GuidanceStep>[];
@@ -271,14 +284,21 @@ class VoiceGuidanceService extends ChangeNotifier {
       }
 
       final mainPart = i == 1
-          ? 'Inicia y camina en linea recta ${distance.round()} metros.'
+          ? _initialOrientationInstruction(
+              from: from,
+              to: to,
+              distanceMeters: distance,
+              deviceHeadingDegrees: initialHeadingDegrees,
+            )
           : 'Continua en linea recta ${distance.round()} metros.';
 
       String turnHint = '';
       if (i < bearings.length) {
         final delta = _normalizeAngle(bearings[i] - bearings[i - 1]);
-        if (delta.abs() >= 30) {
+        if (delta.abs() < 140) {
           turnHint = ' Luego ${_turnHint(delta)}.';
+        } else {
+          turnHint = ' Luego da media vuelta.';
         }
       }
 
@@ -301,6 +321,31 @@ class VoiceGuidanceService extends ChangeNotifier {
     }
 
     return steps;
+  }
+
+  String _initialOrientationInstruction({
+    required RoutePoint from,
+    required RoutePoint to,
+    required double distanceMeters,
+    required double? deviceHeadingDegrees,
+  }) {
+    if (deviceHeadingDegrees == null || deviceHeadingDegrees.isNaN) {
+      return 'Avanza ${distanceMeters.round()} metros.';
+    }
+
+    final targetBearing = _bearingDegrees(from, to);
+    final delta = _normalizeAngle(targetBearing - deviceHeadingDegrees);
+
+    if (delta.abs() <= 30) {
+      return 'Avanza hacia adelante ${distanceMeters.round()} metros.';
+    }
+    if (delta.abs() >= 150) {
+      return 'Da media vuelta y avanza ${distanceMeters.round()} metros.';
+    }
+
+    return delta > 0
+        ? 'Gira a la derecha y avanza ${distanceMeters.round()} metros.'
+        : 'Gira a la izquierda y avanza ${distanceMeters.round()} metros.';
   }
 
   String _turnHint(double delta) {
