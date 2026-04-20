@@ -125,13 +125,13 @@ class LocationService extends ChangeNotifier {
     final LocationSettings locationSettings = Platform.isAndroid
         ? AndroidSettings(
             accuracy: LocationAccuracy.bestForNavigation,
-            distanceFilter: 3, // metros — más frecuente que 5m para peatones
+            distanceFilter: 0,
             forceLocationManager: false, // Usar FusedLocationProvider
             intervalDuration: const Duration(seconds: 1),
           )
         : const LocationSettings(
             accuracy: LocationAccuracy.bestForNavigation,
-            distanceFilter: 3,
+            distanceFilter: 0,
           );
 
     _positionStream = Geolocator.getPositionStream(
@@ -170,6 +170,7 @@ class LocationService extends ChangeNotifier {
     }
 
     LocationData newLocation = LocationData.fromPosition(position);
+    final previousStatus = _status;
 
     // Determinar estado según precisión
     final LocationStatus newStatus = position.accuracy <= 15.0
@@ -196,6 +197,10 @@ class LocationService extends ChangeNotifier {
 
     _currentLocation = newLocation;
     _updateStatus(newStatus);
+
+    if (previousStatus == newStatus) {
+      notifyListeners();
+    }
   }
 
   // Manejar errores del stream

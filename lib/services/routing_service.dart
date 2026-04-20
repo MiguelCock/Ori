@@ -100,6 +100,7 @@ class RoutingService extends ChangeNotifier {
     required double originLng,
     required double destinationLat,
     required double destinationLng,
+    List<List<double>>? originPolygon,
     List<List<double>>? destinationPolygon,
   }) async {
     if (!_isLoaded) {
@@ -113,10 +114,22 @@ class RoutingService extends ChangeNotifier {
 
     final stopwatch = Stopwatch()..start();
 
-    final entry = _nearestEdgeProjection(originLat, originLng);
+    final originBoundaryProjections =
+        originPolygon != null &&
+            originPolygon.length >= 3 &&
+            _isInsidePolygon(originLat, originLng, originPolygon)
+        ? _destinationBoundaryProjections(originPolygon)
+        : const <_EdgeProjection>[];
+
+    final nearestEntryProjection = _nearestEdgeProjection(originLat, originLng);
+    final entryCandidates = originBoundaryProjections.isNotEmpty
+        ? originBoundaryProjections
+        : nearestEntryProjection == null
+        ? const <_EdgeProjection>[]
+        : <_EdgeProjection>[nearestEntryProjection];
     final destinationId = _nearestNodeId(destinationLat, destinationLng);
 
-    if (entry == null || destinationId == null) {
+    if (entryCandidates.isEmpty || destinationId == null) {
       _status = RoutingStatus.error;
       _lastError =
           'No fue posible ubicar una arista de entrada o nodos cercanos para el destino.';
@@ -125,90 +138,102 @@ class RoutingService extends ChangeNotifier {
       return null;
     }
 
-    final workingNodes = _cloneGraphWithEntryNode(entry);
-    final destinationProjections = destinationPolygon != null &&
-            destinationPolygon.length >= 3
+    final destinationProjections =
+        destinationPolygon != null && destinationPolygon.length >= 3
         ? _destinationBoundaryProjections(destinationPolygon)
         : const <_EdgeProjection>[];
 
     RouteResult? bestRoute;
     double bestDistance = double.infinity;
 
-    if (destinationProjections.isNotEmpty) {
-      for (final projection in destinationProjections) {
-        final candidateGraph = _cloneGraphWithVirtualNode(
-          workingNodes,
-          projection,
-        );
-        final candidateSearch = _aStar(
-          candidateGraph,
-          entry.entryNodeId,
-          projection.entryNodeId,
-        );
-        if (candidateSearch == null || candidateSearch.path.isEmpty) {
+    for (final entry in entryCandidates) {
+      final workingNodes = _cloneGraphWithEntryNode(entry);
+
+      if (destinationProjections.isNotEmpty) {
+        for (final projection in destinationProjections) {
+          final candidateGraph = _cloneGraphWithVirtualNode(
+            workingNodes,
+            projection,
+          );
+          final candidateSearch = _aStar(
+            candidateGraph,
+            entry.entryNodeId,
+            projection.entryNodeId,
+          );
+          if (candidateSearch == null || candidateSearch.path.isEmpty) {
+            continue;
+          }
+
+          final candidatePolyline = _buildPolylineFromPath(
+            candidateGraph,
+            candidateSearch.path,
+            originLat,
+            originLng,
+          );
+          final candidateDistance = _computePolylineDistance(candidatePolyline);
+
+          if (candidateDistance < bestDistance) {
+            bestDistance = candidateDistance;
+            bestRoute = RouteResult(
+              nodePath: candidateSearch.path,
+              polyline: candidatePolyline,
+              totalDistanceMeters: candidateDistance,
+              estimatedWalkTime: Duration(
+                seconds: (candidateDistance / 1.35).round(),
+              ),
+              exploredNodes: candidateSearch.exploredNodes,
+              computationTimeMs: stopwatch.elapsedMilliseconds,
+              originNodeId: entry.entryNodeId,
+              destinationNodeId: projection.entryNodeId,
+            );
+          }
+        }
+      }
+
+      if (destinationProjections.isEmpty) {
+        final search = _aStar(workingNodes, entry.entryNodeId, destinationId);
+        if (search == null || search.path.isEmpty) {
           continue;
         }
 
-        final candidatePolyline = _buildPolylineFromPath(
-          candidateGraph,
-          candidateSearch.path,
+        final polyline = _buildPolylineFromPath(
+          workingNodes,
+          search.path,
           originLat,
           originLng,
         );
-        final candidateDistance = _computePolylineDistance(candidatePolyline);
 
-        if (candidateDistance < bestDistance) {
-          bestDistance = candidateDistance;
+        final trimmedPolyline =
+            destinationPolygon != null && destinationPolygon.length >= 3
+            ? _trimPolylineAtPolygon(polyline, destinationPolygon)
+            : polyline;
+
+        final totalDistance = _computePolylineDistance(trimmedPolyline);
+        if (totalDistance < bestDistance) {
+          bestDistance = totalDistance;
           bestRoute = RouteResult(
-            nodePath: candidateSearch.path,
-            polyline: candidatePolyline,
-            totalDistanceMeters: candidateDistance,
+            nodePath: search.path,
+            polyline: trimmedPolyline,
+            totalDistanceMeters: totalDistance,
             estimatedWalkTime: Duration(
-              seconds: (candidateDistance / 1.35).round(),
+              seconds: (totalDistance / 1.35).round(),
             ),
-            exploredNodes: candidateSearch.exploredNodes,
+            exploredNodes: search.exploredNodes,
             computationTimeMs: stopwatch.elapsedMilliseconds,
             originNodeId: entry.entryNodeId,
-            destinationNodeId: projection.entryNodeId,
+            destinationNodeId: destinationId,
           );
         }
       }
     }
 
     if (bestRoute == null) {
-      final search = _aStar(workingNodes, entry.entryNodeId, destinationId);
-      if (search == null || search.path.isEmpty) {
-        _status = RoutingStatus.error;
-        _lastError =
-            'No existe una ruta peatonal conectada entre origen y destino.';
-        _currentRoute = null;
-        notifyListeners();
-        return null;
-      }
-
-      final polyline = _buildPolylineFromPath(
-        workingNodes,
-        search.path,
-        originLat,
-        originLng,
-      );
-
-      final trimmedPolyline =
-          destinationPolygon != null && destinationPolygon.length >= 3
-          ? _trimPolylineAtPolygon(polyline, destinationPolygon)
-          : polyline;
-
-      final totalDistance = _computePolylineDistance(trimmedPolyline);
-      bestRoute = RouteResult(
-        nodePath: search.path,
-        polyline: trimmedPolyline,
-        totalDistanceMeters: totalDistance,
-        estimatedWalkTime: Duration(seconds: (totalDistance / 1.35).round()),
-        exploredNodes: search.exploredNodes,
-        computationTimeMs: stopwatch.elapsedMilliseconds,
-        originNodeId: entry.entryNodeId,
-        destinationNodeId: destinationId,
-      );
+      _status = RoutingStatus.error;
+      _lastError =
+          'No existe una ruta peatonal conectada entre origen y destino.';
+      _currentRoute = null;
+      notifyListeners();
+      return null;
     }
 
     stopwatch.stop();
@@ -316,8 +341,7 @@ class RoutingService extends ChangeNotifier {
             continue;
           }
 
-          final refLat =
-              (from.lat + to.lat + p1Raw[1] + p2Raw[1]) / 4.0;
+          final refLat = (from.lat + to.lat + p1Raw[1] + p2Raw[1]) / 4.0;
           final a2 = _projectPoint(from.lat, from.lon, refLat);
           final b2 = _projectPoint(to.lat, to.lon, refLat);
           final p1 = _projectPoint(p1Raw[1], p1Raw[0], refLat);
@@ -327,7 +351,8 @@ class RoutingService extends ChangeNotifier {
 
           final lat = from.lat + (to.lat - from.lat) * t;
           final lon = from.lon + (to.lon - from.lon) * t;
-          final pointKey = '${lat.toStringAsFixed(6)}|${lon.toStringAsFixed(6)}';
+          final pointKey =
+              '${lat.toStringAsFixed(6)}|${lon.toStringAsFixed(6)}';
           if (!seenPoints.add(pointKey)) continue;
 
           candidates.add(
@@ -338,7 +363,12 @@ class RoutingService extends ChangeNotifier {
               entryLon: lon,
               fromNodeId: from.id,
               toNodeId: to.id,
-              distanceToFromMeters: _haversineMeters(lat, lon, from.lat, from.lon),
+              distanceToFromMeters: _haversineMeters(
+                lat,
+                lon,
+                from.lat,
+                from.lon,
+              ),
               distanceToToMeters: _haversineMeters(lat, lon, to.lat, to.lon),
             ),
           );
@@ -347,6 +377,28 @@ class RoutingService extends ChangeNotifier {
     }
 
     return candidates;
+  }
+
+  bool _isInsidePolygon(double lat, double lon, List<List<double>> polygon) {
+    bool inside = false;
+    int j = polygon.length - 1;
+
+    for (int i = 0; i < polygon.length; i++) {
+      final xi = polygon[i][0];
+      final yi = polygon[i][1];
+      final xj = polygon[j][0];
+      final yj = polygon[j][1];
+
+      final intersects =
+          ((yi > lat) != (yj > lat)) &&
+          (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi);
+      if (intersects) {
+        inside = !inside;
+      }
+      j = i;
+    }
+
+    return inside;
   }
 
   Map<String, _GraphNode> _cloneGraphWithEntryNode(_EdgeProjection entry) {

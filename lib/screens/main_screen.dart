@@ -19,6 +19,21 @@ class MainScreen extends StatefulWidget {
 }
 
 class _MainScreenState extends State<MainScreen> {
+  bool _isInsidePolygon(double lat, double lng, List<List<double>> polygon) {
+    bool inside = false;
+    int j = polygon.length - 1;
+    for (int i = 0; i < polygon.length; i++) {
+      final xi = polygon[i][0], yi = polygon[i][1];
+      final xj = polygon[j][0], yj = polygon[j][1];
+      if (((yi > lat) != (yj > lat)) &&
+          (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi)) {
+        inside = !inside;
+      }
+      j = i;
+    }
+    return inside;
+  }
+
   Future<void> _announce(String message) {
     return SemanticsService.sendAnnouncement(
       View.of(context),
@@ -70,6 +85,7 @@ class _MainScreenState extends State<MainScreen> {
     final location = Provider.of<LocationService>(context, listen: false);
     final routing = Provider.of<RoutingService>(context, listen: false);
     final geo = Provider.of<GeoJsonService>(context, listen: false);
+    final voice = Provider.of<VoiceGuidanceService>(context, listen: false);
 
     if (!location.canStartNavigation()) {
       _announce('No se pudo generar la ruta. Ubicación actual no disponible.');
@@ -118,11 +134,56 @@ class _MainScreenState extends State<MainScreen> {
       return;
     }
 
+    final destinationPolygon = place.polygon;
+    final alreadyAtDestination =
+        destinationPolygon != null &&
+        destinationPolygon.length >= 3 &&
+        _isInsidePolygon(origin.latitude, origin.longitude, destinationPolygon);
+    if (alreadyAtDestination) {
+      final message = 'Ya estás dentro de ${place.name}.';
+      _announce(message);
+      await voice.speakMessage(message);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: const Color(0xFF1565C0),
+        ),
+      );
+      return;
+    }
+
+    final originPlace = geo.getPlaceContaining(
+      origin.latitude,
+      origin.longitude,
+    );
+    if (originPlace?.polygon != null) {
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => NavigationMapScreen(
+            destinationName: place.name,
+            startLat: origin.latitude,
+            startLng: origin.longitude,
+            destLat: place.latitude,
+            destLng: place.longitude,
+            highlightCategoryId: place.primaryCategory,
+            initialRoute: null,
+            destinationPolygon: place.polygon,
+          ),
+        ),
+      );
+      return;
+    }
+
     final route = await routing.buildRoute(
       originLat: origin.latitude,
       originLng: origin.longitude,
       destinationLat: place.latitude,
       destinationLng: place.longitude,
+      originPolygon: geo
+          .getPlaceContaining(origin.latitude, origin.longitude)
+          ?.polygon,
       destinationPolygon: place.polygon,
     );
 
@@ -135,19 +196,6 @@ class _MainScreenState extends State<MainScreen> {
     if (!mounted) return;
 
     if (hasRoute) {
-      final voice = Provider.of<VoiceGuidanceService>(context, listen: false);
-      await voice.startNavigation(
-        route: route,
-        locationService: location,
-        routingService: routing,
-        destinationName: place.name,
-        destinationLat: place.latitude,
-        destinationLng: place.longitude,
-        announceForTalkBack: _announce,
-        landmarkResolver: (lat, lng) => geo.getNearestBlockReference(lat, lng),
-      );
-
-      if (!mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => NavigationMapScreen(
