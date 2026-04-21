@@ -3,9 +3,40 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'location_service.dart';
 import 'routing_service.dart';
+import 'haptic_service.dart';
 
 typedef VoiceAnnouncer = Future<void> Function(String message);
 typedef LandmarkResolver = String? Function(double lat, double lng);
+
+// ── HU-18: Mensajes del sistema centralizados ──
+// Todos los textos fijos que la app lee en voz están aquí.
+// Cambiar un mensaje = cambiar solo esta clase.
+class NavigationMessages {
+  static String navigationStarted(String destination) =>
+      'Navegación iniciada hacia $destination.';
+
+  static String navigationStopped() => 'Navegación detenida.';
+
+  static String destinationReached(String destination) =>
+      'Has llegado a $destination. Navegación finalizada.';
+
+  static String offRoute() => 'Te has alejado de la ruta. Recalculando.';
+
+  static String routeUpdated(String firstInstruction) =>
+      'Ruta actualizada. $firstInstruction';
+
+  static String rerouteFailed() =>
+      'No pude recalcular la ruta en este momento.';
+
+  static String keepStraight(int meters) =>
+      'Sigue en línea recta. Próxima indicación en $meters metros.';
+
+  static String passingLandmark(String landmark) =>
+      'Vas pasando junto a $landmark.';
+
+  static String noPointsForGuidance() =>
+      'No hay suficientes puntos para guiar por voz.';
+}
 
 class GuidanceStep {
   final RoutePoint endPoint;
@@ -47,6 +78,11 @@ class VoiceGuidanceService extends ChangeNotifier {
   DateTime _lastRerouteAt = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastReminderAt = DateTime.fromMillisecondsSinceEpoch(0);
 
+  // HU-16: Control de landmarks
+  String? _lastAnnouncedLandmark;
+  DateTime _lastLandmarkAt = DateTime.fromMillisecondsSinceEpoch(0);
+  static const Duration _minTimeBetweenLandmarks = Duration(seconds: 15);
+
   double _minInstructionDistanceMeters = 12;
 
   bool get isNavigating => _isNavigating;
@@ -60,9 +96,17 @@ class VoiceGuidanceService extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ── HU-18: API pública de lectura de texto ──
+  // Llama esto desde cualquier pantalla para leer un mensaje
+  // del sistema de forma inmediata, coordinando TTS y TalkBack.
+  // Ejemplo: VoiceGuidanceService().speak('Navegación iniciada.');
+  Future<void> speak(String message) async {
+    await _initTts();
+    await _speakAndAnnounce(message);
+  }
+
   Future<void> _initTts() async {
     if (_ttsReady) return;
-
     try {
       await _tts.awaitSpeakCompletion(true);
       await _tts.setSpeechRate(0.47);
@@ -101,13 +145,16 @@ class VoiceGuidanceService extends ChangeNotifier {
     _destinationLat = destinationLat;
     _destinationLng = destinationLng;
 
+    _lastAnnouncedLandmark = null;
+    _lastLandmarkAt = DateTime.fromMillisecondsSinceEpoch(0);
+
     _activePolyline = List<RoutePoint>.from(route.polyline);
     _steps
       ..clear()
       ..addAll(_buildSteps(_activePolyline));
 
     if (_steps.isEmpty) {
-      _status = 'No hay suficientes puntos para guiar por voz.';
+      _status = NavigationMessages.noPointsForGuidance();
       notifyListeners();
       return;
     }
@@ -120,8 +167,12 @@ class VoiceGuidanceService extends ChangeNotifier {
     _locationService?.addListener(_onLocationChanged);
     notifyListeners();
 
+    // HU-17: vibración de inicio
+    await HapticService.trigger(HapticEvent.navigationStarted);
+
+    // HU-18: mensaje centralizado
     await _speakAndAnnounce(
-      'Navegación iniciada hacia $_destinationName. ${_steps.first.instruction}',
+      '${NavigationMessages.navigationStarted(destinationName)} ${_steps.first.instruction}',
     );
   }
 
@@ -137,75 +188,17 @@ class VoiceGuidanceService extends ChangeNotifier {
     _isNavigating = false;
     _currentInstruction = '';
     _status = 'Navegación por voz inactiva';
+    _lastAnnouncedLandmark = null;
 
     if (speak) {
-      await _speakAndAnnounce('Navegación detenida.');
+      // HU-18: mensaje centralizado
+      await _speakAndAnnounce(NavigationMessages.navigationStopped());
     } else {
       await _tts.stop();
     }
 
     notifyListeners();
   }
-
-  // Método general para leer cualquier texto, independiente de la navegación
-  Future<void> speak(String text) async {
-    await _initTts();
-    await _speakAndAnnounce(text);
-  }
-
-  // Calcula la distancia restante nodo a nodo desde la posición actual
-  double getRemainingDistance(double currentLat, double currentLng) {
-    // Si no está navegando o ya terminó, retorna 0
-    if (!_isNavigating || _currentStepIndex >= _steps.length) return 0;
-
-    double total = 0;
-
-    // Primero: distancia desde donde estoy hasta el próximo punto de guía
-    total += _haversineMeters(
-      currentLat,
-      currentLng,
-      _steps[_currentStepIndex].endPoint.latitude,
-      _steps[_currentStepIndex].endPoint.longitude,
-    );
-
-    // Luego: suma todos los segmentos que faltan después de ese punto
-    for (int i = _currentStepIndex + 1; i < _steps.length; i++) {
-      total += _haversineMeters(
-        _steps[i - 1].endPoint.latitude,
-        _steps[i - 1].endPoint.longitude,
-        _steps[i].endPoint.latitude,
-        _steps[i].endPoint.longitude,
-      );
-    }
-
-    return total;
-  }
-
-  // El usuario puede pedir la distancia restante en cualquier momento
-  Future<void> announceRemainingDistance() async {
-    final loc = _locationService?.currentLocation;
-
-    if (!_isNavigating) {
-      await _speakAndAnnounce('No hay una navegación activa en este momento.');
-      return;
-    }
-
-    if (loc == null) {
-      await _speakAndAnnounce('No se puede calcular la distancia, el GPS no está disponible.');
-      return;
-    }
-
-    final meters = getRemainingDistance(loc.latitude, loc.longitude);
-
-    // Formato legible según la distancia
-    final text = meters >= 1000
-        ? 'Te faltan ${(meters / 1000).toStringAsFixed(1)} kilómetros para llegar a $_destinationName.'
-        : 'Te faltan ${meters.round()} metros para llegar a $_destinationName.';
-
-    await _speakAndAnnounce(text);
-  }
-
-
 
   Future<void> _onLocationChanged() async {
     if (!_isNavigating || _locationService?.currentLocation == null) return;
@@ -227,16 +220,23 @@ class VoiceGuidanceService extends ChangeNotifier {
     );
 
     final now = DateTime.now();
+
+    // Instrucción de navegación: prioridad máxima
     if (distanceToStep <= step.triggerDistanceMeters) {
       _currentStepIndex++;
 
       if (_currentStepIndex >= _steps.length) {
-        _currentInstruction = 'Has llegado a $_destinationName';
+        _currentInstruction =
+            'Has llegado a $_destinationName';
         _status = 'Destino alcanzado';
         notifyListeners();
+
+        // HU-17: vibración de llegada
+        await HapticService.trigger(HapticEvent.destinationReached);
+
+        // HU-18: mensaje centralizado
         await _speakAndAnnounce(
-          'Has llegado a $_destinationName. Navegación finalizada.',
-        );
+            NavigationMessages.destinationReached(_destinationName));
         await stopNavigation(speak: false);
         return;
       }
@@ -244,25 +244,45 @@ class VoiceGuidanceService extends ChangeNotifier {
       _currentInstruction = _steps[_currentStepIndex].instruction;
       _status = 'Navegación activa hacia $_destinationName';
       notifyListeners();
+
+      // HU-17: vibración de giro
+      await HapticService.trigger(HapticEvent.turnInstruction);
+
       await _speakAndAnnounce(_currentInstruction);
+      _lastLandmarkAt = DateTime.fromMillisecondsSinceEpoch(0);
       return;
     }
 
+    // HU-16: Landmark cercano
+    final enoughTimeSinceLandmark =
+        now.difference(_lastLandmarkAt) >= _minTimeBetweenLandmarks;
+    final notAboutToTurn = distanceToStep > step.triggerDistanceMeters + 10;
+
+    if (enoughTimeSinceLandmark && notAboutToTurn) {
+      final landmark =
+          _landmarkResolver?.call(current.latitude, current.longitude);
+      if (landmark != null && landmark != _lastAnnouncedLandmark) {
+        _lastAnnouncedLandmark = landmark;
+        _lastLandmarkAt = now;
+        // HU-18: mensaje centralizado
+        await _speakAndAnnounce(
+            NavigationMessages.passingLandmark(landmark));
+        return;
+      }
+    }
+
+    // Recordatorio periódico cada 20 segundos
     if (now.difference(_lastReminderAt).inSeconds >= 20) {
       _lastReminderAt = now;
-      final rounded = distanceToStep.round();
-      final reference = _landmarkResolver?.call(current.latitude, current.longitude);
-      final referenceText = reference == null ? '' : ' Vas pasando junto a $reference.';
+      // HU-18: mensaje centralizado
       await _speakAndAnnounce(
-        'Sigue en linea recta. Proxima indicacion en $rounded metros.$referenceText',
-      );
+          NavigationMessages.keepStraight(distanceToStep.round()));
     }
   }
 
   bool _isFarFromRoute(double lat, double lng) {
     if (_activePolyline.isEmpty) return false;
     double best = double.infinity;
-
     for (final p in _activePolyline) {
       final d = _haversineMeters(lat, lng, p.latitude, p.longitude);
       if (d < best) best = d;
@@ -278,7 +298,11 @@ class VoiceGuidanceService extends ChangeNotifier {
     final routing = _routingService;
     if (routing == null) return;
 
-    await _speakAndAnnounce('Te has alejado de la ruta. Recalculando.');
+    // HU-17: vibración de recálculo
+    await HapticService.trigger(HapticEvent.routeRecalculated);
+
+    // HU-18: mensaje centralizado
+    await _speakAndAnnounce(NavigationMessages.offRoute());
 
     final updated = await routing.buildRoute(
       originLat: originLat,
@@ -288,7 +312,10 @@ class VoiceGuidanceService extends ChangeNotifier {
     );
 
     if (updated == null || updated.polyline.length < 2) {
-      await _speakAndAnnounce('No pude recalcular la ruta en este momento.');
+      // HU-17: vibración de error
+      await HapticService.trigger(HapticEvent.error);
+      // HU-18: mensaje centralizado
+      await _speakAndAnnounce(NavigationMessages.rerouteFailed());
       return;
     }
 
@@ -299,9 +326,12 @@ class VoiceGuidanceService extends ChangeNotifier {
     _currentStepIndex = 0;
     _currentInstruction = _steps.first.instruction;
     _status = 'Ruta actualizada hacia $_destinationName';
+    _lastAnnouncedLandmark = null;
     notifyListeners();
 
-    await _speakAndAnnounce('Ruta actualizada. ${_steps.first.instruction}');
+    // HU-18: mensaje centralizado
+    await _speakAndAnnounce(
+        NavigationMessages.routeUpdated(_steps.first.instruction));
   }
 
   List<GuidanceStep> _buildSteps(List<RoutePoint> polyline) {
@@ -309,7 +339,6 @@ class VoiceGuidanceService extends ChangeNotifier {
 
     final steps = <GuidanceStep>[];
     final bearings = <double>[];
-    String? lastReference;
 
     for (int i = 1; i < polyline.length; i++) {
       bearings.add(_bearingDegrees(polyline[i - 1], polyline[i]));
@@ -324,15 +353,10 @@ class VoiceGuidanceService extends ChangeNotifier {
         to.latitude,
         to.longitude,
       );
-      final reference = _landmarkResolver?.call(to.latitude, to.longitude);
-      final includeReference = reference != null && reference != lastReference;
-      if (reference != null) {
-        lastReference = reference;
-      }
 
       final mainPart = i == 1
-          ? 'Inicia y camina en linea recta ${distance.round()} metros.'
-          : 'Continua en linea recta ${distance.round()} metros.';
+          ? 'Inicia y camina en línea recta ${distance.round()} metros.'
+          : 'Continúa en línea recta ${distance.round()} metros.';
 
       String turnHint = '';
       if (i < bearings.length) {
@@ -343,21 +367,19 @@ class VoiceGuidanceService extends ChangeNotifier {
       }
 
       final instruction = i == polyline.length - 1
-          ? '$mainPart Continua hasta llegar al destino.'
-          : '$mainPart$turnHint${includeReference ? ' Pasaras junto a $reference.' : ''}';
+          ? '$mainPart Continúa hasta llegar al destino.'
+          : '$mainPart$turnHint';
 
       final trigger = max(
         _minInstructionDistanceMeters,
         min(20.0, distance * 0.35),
       );
 
-      steps.add(
-        GuidanceStep(
-          endPoint: to,
-          instruction: instruction,
-          triggerDistanceMeters: trigger,
-        ),
-      );
+      steps.add(GuidanceStep(
+        endPoint: to,
+        instruction: instruction,
+        triggerDistanceMeters: trigger,
+      ));
     }
 
     return steps;
@@ -394,7 +416,6 @@ class VoiceGuidanceService extends ChangeNotifier {
     final lat1 = _toRad(a.latitude);
     final lat2 = _toRad(b.latitude);
     final dLon = _toRad(b.longitude - a.longitude);
-
     final y = sin(dLon) * cos(lat2);
     final x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dLon);
     final bearing = atan2(y, x) * 180.0 / pi;
