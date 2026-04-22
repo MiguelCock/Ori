@@ -68,9 +68,10 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
   String? _waitingExitPlaceName;
   List<List<double>>? _waitingExitPolygon;
   int _waitingExitOutsideSamples = 0;
+  int? _lastNearestRoutePointIndex;
 
-  static const double _maxDistanceFromRouteMeters = 22.0;
-  static const double _minMoveToOptionalRerouteMeters = 35.0;
+  static const double _maxDistanceFromRouteMeters = 25.0;
+  static const double _minMoveToOptionalRerouteMeters = 15.0;
   static const Duration _minTimeBetweenReroutes = Duration(seconds: 1);
   static const Duration _minTimeBetweenAnnouncements = Duration(seconds: 20);
 
@@ -271,6 +272,7 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
       _routeDistanceMeters = route.totalDistanceMeters;
       _hasError = points.length < 2;
       _isLoading = false;
+      _lastNearestRoutePointIndex = null;
     });
   }
 
@@ -470,6 +472,19 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
           (remaining != null && remaining > 0) ? remaining : _routeDistanceMeters;
     });
 
+    final nearestIndex = _nearestRoutePointIndex();
+    final targetIndex = _targetRoutePointIndex();
+    final shouldForceByProgress = _shouldForceRerouteByNodeProgress(
+      nearestIndex: nearestIndex,
+      targetIndex: targetIndex,
+    );
+    _lastNearestRoutePointIndex = nearestIndex;
+
+    if (shouldForceByProgress) {
+      _recalculateLocalRoute(newOrigin: next, force: true);
+      return;
+    }
+
     final waitingPolygon = _waitingExitPolygon;
     if (waitingPolygon != null && waitingPolygon.length >= 3) {
       final stillInside = _isInsidePolygon(
@@ -600,6 +615,30 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     return bestIndex;
   }
 
+  int? _targetRoutePointIndex() {
+    if (_routePoints.length < 3) return null;
+
+    final nearest = _nearestRoutePointIndex();
+    if (nearest == null) return null;
+
+    // Next node in the active route, excluding the final destination node.
+    return (nearest + 1).clamp(1, _routePoints.length - 2);
+  }
+
+  bool _shouldForceRerouteByNodeProgress({
+    required int? nearestIndex,
+    required int? targetIndex,
+  }) {
+    if (nearestIndex == null) return false;
+
+    final lastNearest = _lastNearestRoutePointIndex;
+    final jumpedAhead =
+        lastNearest != null && nearestIndex >= lastNearest + 2 && nearestIndex > 1;
+    final passedTarget = targetIndex != null && nearestIndex > targetIndex;
+
+    return jumpedAhead || passedTarget;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -691,26 +730,35 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     final routeNodeMarkers = <Marker>[];
     if (_routePoints.length >= 2) {
       final nearestRoutePointIndex = _nearestRoutePointIndex();
+      final targetRoutePointIndex = _targetRoutePointIndex();
       for (var i = 1; i < _routePoints.length; i++) {
         final point = _routePoints[i];
         final isDestinationNode = i == _routePoints.length - 1;
         final isCurrentNode = nearestRoutePointIndex == i;
+        final isTargetNode = targetRoutePointIndex == i;
         routeNodeMarkers.add(
           Marker(
             point: point,
-            width: isDestinationNode || isCurrentNode ? 20 : 12,
-            height: isDestinationNode || isCurrentNode ? 20 : 12,
+            width: isDestinationNode || isCurrentNode || isTargetNode ? 22 : 10,
+            height:
+                isDestinationNode || isCurrentNode || isTargetNode ? 22 : 10,
             child: Container(
               decoration: BoxDecoration(
                 color: isCurrentNode
                     ? const Color(0xFF43A047)
-                    : const Color(0xFFFFD54F),
+                    : isTargetNode
+                    ? const Color(0xFFE53935)
+                    : const Color(0xFFFFD54F).withValues(alpha: 0.45),
                 shape: BoxShape.circle,
                 border: Border.all(
                   color: isCurrentNode
                       ? const Color(0xFF1B5E20)
+                      : isTargetNode
+                      ? const Color(0xFFB71C1C)
                       : const Color(0xFFF9A825),
-                  width: isDestinationNode || isCurrentNode ? 2.6 : 1.4,
+                  width: isDestinationNode || isCurrentNode || isTargetNode
+                      ? 2.6
+                      : 1.2,
                 ),
               ),
             ),
@@ -721,14 +769,40 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
 
     final userMarker = Marker(
       point: _currentUser,
-      width: 18,
-      height: 18,
-      child: Container(
-        decoration: BoxDecoration(
-          color: const Color(0xFF43A047),
-          borderRadius: BorderRadius.circular(9),
-          border: Border.all(color: const Color(0xFF1B5E20), width: 2),
-        ),
+      width: 30,
+      height: 30,
+      child: Builder(
+        builder: (context) {
+          final heading =
+              _voiceService?.mapReferenceHeadingDegrees ??
+              _locationService?.currentLocation?.heading;
+          final validHeading =
+              heading != null && heading.isFinite && heading >= 0;
+
+          return Stack(
+            alignment: Alignment.center,
+            children: [
+              Container(
+                width: 18,
+                height: 18,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF43A047),
+                  borderRadius: BorderRadius.circular(9),
+                  border: Border.all(color: const Color(0xFF1B5E20), width: 2),
+                ),
+              ),
+              if (validHeading)
+                Transform.rotate(
+                  angle: heading * math.pi / 180,
+                  child: const Icon(
+                    Icons.navigation_rounded,
+                    size: 14,
+                    color: Color(0xFF1B5E20),
+                  ),
+                ),
+            ],
+          );
+        },
       ),
     );
 

@@ -127,7 +127,7 @@ class LocationService extends ChangeNotifier {
             accuracy: LocationAccuracy.bestForNavigation,
             distanceFilter: 0,
             forceLocationManager: false, // Usar FusedLocationProvider
-            intervalDuration: const Duration(seconds: 1),
+            intervalDuration: const Duration(milliseconds: 500),
           )
         : const LocationSettings(
             accuracy: LocationAccuracy.bestForNavigation,
@@ -158,13 +158,14 @@ class LocationService extends ChangeNotifier {
   // Manejar actualización de posición
   void _handlePositionUpdate(Position position) {
     // Filtro de calidad: si ya tenemos una posición buena (< 15m) y llega una
-    // muy mala (> 30m), la descartamos para evitar saltos bruscos en la ruta.
-    // Si aún no tenemos ninguna posición, aceptamos cualquier precisión.
+    // muy mala (> 50m), la descartamos para evitar saltos bruscos en la ruta.
+    // Umbral subido de 30m a 50m para no congelar la posición en campus
+    // donde el GPS fluctúa normalmente entre 15–35m entre edificios.
     if (_currentLocation != null &&
         _currentLocation!.accuracy < 15.0 &&
-        position.accuracy > 30.0) {
+        position.accuracy > 50.0) {
       debugPrint(
-        'GPS: posición descartada (precisión ${position.accuracy.toStringAsFixed(1)}m > 30m, manteniendo la anterior).',
+        'GPS: posición descartada (precisión ${position.accuracy.toStringAsFixed(1)}m > 50m, manteniendo la anterior).',
       );
       return;
     }

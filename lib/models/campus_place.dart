@@ -93,6 +93,33 @@ class CampusPlace {
 
   double _rad(double deg) => deg * pi / 180;
 
+  Map<String, dynamic> basicInfo() {
+    return {
+      'nombre': name,
+      'tipo': buildingType.isEmpty ? 'No especificado' : buildingType,
+      'descripcion': description,
+      'horario': schedule.isEmpty ? 'Horario no disponible' : schedule,
+    };
+  }
+
+  Map<String, dynamic> extendedInfo() {
+    return {
+      'nombre': name,
+      'tipo': buildingType.isEmpty ? 'No especificado' : buildingType,
+      'descripcion': description,
+      'descripcion ampliada': extendedDescription.isEmpty
+          ? description
+          : extendedDescription,
+      'horario': schedule.isEmpty ? 'Horario no disponible' : schedule,
+      'servicios': services,
+      'accesibilidad': accessibilityInfo.isEmpty
+          ? 'Sin información de accesibilidad'
+          : accessibilityInfo,
+      'categorias': categories,
+      'coordenadas': '${latitude.toStringAsFixed(6)}, ${longitude.toStringAsFixed(6)}',
+    };
+  }
+
   @override
   String toString() => name;
 }
