@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_compass/flutter_compass.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'route_guidance_builder.dart';
 import 'location_service.dart';
 import 'routing_service.dart';
@@ -31,8 +32,13 @@ class NavigationMessages {
   static String rerouteFailed() =>
       'No pude recalcular la ruta en este momento.';
 
-  static String keepStraight(int meters) =>
-      'Sigue en línea recta. Próxima indicación en $meters metros.';
+  static String periodicProgress({
+    required int nextInstructionMeters,
+    required String remainingDistanceText,
+    required String destination,
+  }) =>
+      'Vas correctamente por la ruta. Próxima indicación en $nextInstructionMeters metros. '
+      'Faltan $remainingDistanceText para llegar a $destination.';
 
   static String passingLandmark(String landmark) => 'Junto a $landmark.';
 
@@ -89,12 +95,16 @@ class VoiceGuidanceService extends ChangeNotifier {
   RoutePoint? _lastHeadingSamplePoint;
   double? _latestWalkingHeadingDegrees;
   double? _committedHeadingDegrees;
+  bool _periodicProgressConfirmationsEnabled = true;
+  bool _preferencesLoaded = false;
+  bool _arrivalHandled = false;
+  bool _arrivalHapticTriggered = false;
 
   // HU-16: Control de landmarks
   String? _lastAnnouncedLandmark;
   DateTime _lastLandmarkAt = DateTime.fromMillisecondsSinceEpoch(0);
 
-  static const Duration _reminderInterval = Duration(seconds: 20);
+  static const Duration _progressConfirmationInterval = Duration(seconds: 20);
   static const Duration _minTimeBetweenLandmarks = Duration(seconds: 15);
   static const double _minMovementMetersForReminderClock = 1.8;
   static const double _minSpeedMpsForReminderClock = 0.35;
@@ -106,6 +116,10 @@ class VoiceGuidanceService extends ChangeNotifier {
   static const double _turnBearingThresholdDegrees = 28.0;
   static const double _maxDistanceFromRouteMeters = 25.0;
   static const double _minMovementMetersForHeadingUpdate = 2.5;
+  static const double _destinationArrivalRadiusMeters = 12.0;
+  static const double _progressConfirmationTurnBufferMeters = 8.0;
+  static const String _periodicProgressPrefKey =
+      'periodic_progress_confirmations_enabled';
 
   double _minInstructionDistanceMeters = 12;
 
@@ -114,6 +128,31 @@ class VoiceGuidanceService extends ChangeNotifier {
   String get currentInstruction => _currentInstruction;
   int get remainingSteps => max(0, _steps.length - _currentStepIndex);
   double get minInstructionDistanceMeters => _minInstructionDistanceMeters;
+  bool get periodicProgressConfirmationsEnabled =>
+      _periodicProgressConfirmationsEnabled;
+
+  Future<void> _ensurePreferencesLoaded() async {
+    if (_preferencesLoaded) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _periodicProgressConfirmationsEnabled =
+          prefs.getBool(_periodicProgressPrefKey) ?? true;
+    } catch (_) {
+      _periodicProgressConfirmationsEnabled = true;
+    }
+    _preferencesLoaded = true;
+  }
+
+  Future<void> setPeriodicProgressConfirmationsEnabled(bool enabled) async {
+    await _ensurePreferencesLoaded();
+    if (_periodicProgressConfirmationsEnabled == enabled) return;
+    _periodicProgressConfirmationsEnabled = enabled;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_periodicProgressPrefKey, enabled);
+    } catch (_) {}
+  }
 
   double? get mapReferenceHeadingDegrees {
     if (!_isNavigating) return null;
@@ -221,6 +260,7 @@ class VoiceGuidanceService extends ChangeNotifier {
     required VoiceAnnouncer announceForTalkBack,
     LandmarkResolver? landmarkResolver,
   }) async {
+    await _ensurePreferencesLoaded();
     await _initTts();
     await stopNavigation(speak: false);
 
@@ -284,6 +324,8 @@ class VoiceGuidanceService extends ChangeNotifier {
     _lastHeadingSamplePoint = _lastReminderSamplePoint;
     _latestWalkingHeadingDegrees = null;
     _committedHeadingDegrees = null;
+    _arrivalHandled = false;
+    _arrivalHapticTriggered = false;
 
     _locationService?.addListener(_onLocationChanged);
     notifyListeners();
@@ -318,6 +360,8 @@ class VoiceGuidanceService extends ChangeNotifier {
     _latestWalkingHeadingDegrees = null;
     _committedHeadingDegrees = null;
     _initialCalibratedHeadingDegrees = null;
+    _arrivalHandled = false;
+    _arrivalHapticTriggered = false;
 
     if (speak) {
       await _speakAndAnnounce(NavigationMessages.navigationStopped());
@@ -333,6 +377,19 @@ class VoiceGuidanceService extends ChangeNotifier {
 
     final current = _locationService!.currentLocation!;
     final now = DateTime.now();
+
+    final distanceToDestination = _haversineMeters(
+      current.latitude,
+      current.longitude,
+      _destinationLat,
+      _destinationLng,
+    );
+    if (!_arrivalHandled &&
+        distanceToDestination <= _destinationArrivalRadiusMeters) {
+      await _completeArrival();
+      return;
+    }
+
     _updateMovingReminderClock(current, now);
     _updateWalkingHeading(current);
     _syncStepIndexWithProgress(current.latitude, current.longitude);
@@ -356,20 +413,7 @@ class VoiceGuidanceService extends ChangeNotifier {
       _currentStepIndex++;
 
       if (_currentStepIndex >= _steps.length) {
-        _currentInstruction = NavigationMessages.destinationReached(
-          _destinationName,
-        );
-        _status = 'Destino alcanzado';
-        notifyListeners();
-
-        // HU-17: vibración de llegada
-        await HapticService.trigger(HapticEvent.destinationReached);
-
-        // HU-18: mensaje centralizado
-        await _speakAndAnnounce(
-          NavigationMessages.destinationReached(_destinationName),
-        );
-        await stopNavigation(speak: false);
+        await _completeArrival();
         return;
       }
 
@@ -406,14 +450,51 @@ class VoiceGuidanceService extends ChangeNotifier {
       }
     }
 
-    // Recordatorio periódico cada 20 segundos mientras el usuario se mueve
-    if (_movingReminderElapsed >= _reminderInterval) {
-      _movingReminderElapsed -= _reminderInterval;
-      // HU-18: mensaje centralizado
+    // HU-12: confirmación periódica de progreso
+    final shouldConfirmProgress =
+        _periodicProgressConfirmationsEnabled &&
+        _movingReminderElapsed >= _progressConfirmationInterval &&
+        distanceToStep >
+            step.triggerDistanceMeters + _progressConfirmationTurnBufferMeters;
+
+    if (shouldConfirmProgress) {
+      _movingReminderElapsed -= _progressConfirmationInterval;
+      final remainingMeters = getRemainingDistance(
+        current.latitude,
+        current.longitude,
+      );
+      final remainingText = remainingMeters >= 1000
+          ? '${(remainingMeters / 1000).toStringAsFixed(1)} kilómetros'
+          : '${remainingMeters.round()} metros';
       await _speakAndAnnounce(
-        NavigationMessages.keepStraight(distanceToStep.round()),
+        NavigationMessages.periodicProgress(
+          nextInstructionMeters: distanceToStep.round(),
+          remainingDistanceText: remainingText,
+          destination: _destinationName,
+        ),
       );
     }
+  }
+
+  Future<void> _completeArrival() async {
+    if (_arrivalHandled) return;
+    _arrivalHandled = true;
+
+    _currentInstruction = NavigationMessages.destinationReached(
+      _destinationName,
+    );
+    _status = 'Destino alcanzado';
+    notifyListeners();
+
+    if (!_arrivalHapticTriggered) {
+      _arrivalHapticTriggered = true;
+      await HapticService.trigger(HapticEvent.destinationReached);
+    }
+
+    await _speakAndAnnounce(
+      NavigationMessages.destinationReached(_destinationName),
+    );
+    await stopNavigation(speak: false);
   }
 
   bool _isFarFromRoute(double lat, double lng) {

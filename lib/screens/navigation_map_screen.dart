@@ -90,6 +90,68 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     await _voiceService?.speakMessage(message);
   }
 
+  Future<void> _openGuidanceSettings() async {
+    final voice = _voiceService;
+    if (voice == null) return;
+
+    var periodicEnabled = voice.periodicProgressConfirmationsEnabled;
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF12263A),
+              title: const Text(
+                'Configuración de guía',
+                style: TextStyle(color: Colors.white),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SwitchListTile(
+                    value: periodicEnabled,
+                    onChanged: (enabled) async {
+                      setDialogState(() => periodicEnabled = enabled);
+                      await voice.setPeriodicProgressConfirmationsEnabled(
+                        enabled,
+                      );
+                      if (!mounted) return;
+                      final message = enabled
+                          ? 'Confirmaciones periódicas de progreso activadas.'
+                          : 'Confirmaciones periódicas de progreso desactivadas.';
+                      await _announceAndSpeak(message);
+                    },
+                    title: const Text(
+                      'Confirmaciones periódicas',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                    subtitle: const Text(
+                      'Recibe mensajes automáticos de avance durante la ruta.',
+                      style: TextStyle(color: Colors.white70),
+                    ),
+                    activeColor: const Color(0xFF82B1FF),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text(
+                    'Cerrar',
+                    style: TextStyle(color: Color(0xFF82B1FF)),
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   Color _areaFillColor({required bool highlighted}) {
     return highlighted
         ? const Color(0xFF7E57C2).withValues(alpha: 0.22)
@@ -282,10 +344,7 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
           .map(
             (step) => _RouteStep(
               instruction: step.instruction,
-              location: LatLng(
-                step.endPoint.latitude,
-                step.endPoint.longitude,
-              ),
+              location: LatLng(step.endPoint.latitude, step.endPoint.longitude),
             ),
           )
           .toList();
@@ -432,12 +491,16 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
 
     // HU-16: actualizar distancia restante desde VoiceGuidanceService
     final voice = _voiceService;
-    final remaining = voice?.getRemainingDistance(here.latitude, here.longitude);
+    final remaining = voice?.getRemainingDistance(
+      here.latitude,
+      here.longitude,
+    );
 
     setState(() {
       _currentUser = next;
-      _remainingDistanceMeters =
-          (remaining != null && remaining > 0) ? remaining : _routeDistanceMeters;
+      _remainingDistanceMeters = (remaining != null && remaining > 0)
+          ? remaining
+          : _routeDistanceMeters;
     });
 
     final waitingPolygon = _waitingExitPolygon;
@@ -757,8 +820,9 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                                       decoration: BoxDecoration(
                                         color: const Color(0xCC0D1B2A),
                                         borderRadius: BorderRadius.circular(12),
-                                        border:
-                                            Border.all(color: Colors.white24),
+                                        border: Border.all(
+                                          color: Colors.white24,
+                                        ),
                                       ),
                                       child: Text(
                                         _normalizeText(widget.destinationName),
@@ -767,6 +831,22 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                                         style: const TextStyle(
                                           color: Colors.white,
                                           fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Semantics(
+                                    button: true,
+                                    label: 'Configuración de guía',
+                                    child: Material(
+                                      color: const Color(0xCC1A237E),
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: IconButton(
+                                        onPressed: _openGuidanceSettings,
+                                        icon: const Icon(
+                                          Icons.tune_rounded,
+                                          color: Colors.white,
                                         ),
                                       ),
                                     ),
@@ -787,8 +867,7 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                                     decoration: BoxDecoration(
                                       color: const Color(0xCC0D1B2A),
                                       borderRadius: BorderRadius.circular(10),
-                                      border:
-                                          Border.all(color: Colors.white24),
+                                      border: Border.all(color: Colors.white24),
                                     ),
                                     child: Text(
                                       'Filtro: ${_normalizeText(selectedLabel)}',
@@ -822,18 +901,21 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                                           // HU-16: chip de distancia restante
                                           Expanded(
                                             child: Semantics(
-                                              label: _remainingDistanceMeters ==
+                                              label:
+                                                  _remainingDistanceMeters ==
                                                       null
                                                   ? 'Distancia restante no disponible'
                                                   : 'Distancia restante: ${_formatDistance(_remainingDistanceMeters!)}',
                                               child: _MetricChip(
                                                 icon: Icons.straighten_rounded,
                                                 label: 'Distancia restante',
-                                                value: _remainingDistanceMeters ==
+                                                value:
+                                                    _remainingDistanceMeters ==
                                                         null
                                                     ? '--'
                                                     : _formatDistance(
-                                                        _remainingDistanceMeters!),
+                                                        _remainingDistanceMeters!,
+                                                      ),
                                               ),
                                             ),
                                           ),
@@ -877,9 +959,11 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                                               ),
                                               padding:
                                                   const EdgeInsets.symmetric(
-                                                      vertical: 10),
+                                                    vertical: 10,
+                                                  ),
                                               textStyle: const TextStyle(
-                                                  fontSize: 13),
+                                                fontSize: 13,
+                                              ),
                                             ),
                                           ),
                                         ),
@@ -928,18 +1012,21 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                                                             0xFF1565C0,
                                                           ),
                                                           borderRadius:
-                                                              BorderRadius
-                                                                  .circular(11),
+                                                              BorderRadius.circular(
+                                                                11,
+                                                              ),
                                                         ),
                                                         child: Text(
                                                           '${i + 1}',
                                                           style:
                                                               const TextStyle(
-                                                            color: Colors.white,
-                                                            fontSize: 12,
-                                                            fontWeight:
-                                                                FontWeight.bold,
-                                                          ),
+                                                                color: Colors
+                                                                    .white,
+                                                                fontSize: 12,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .bold,
+                                                              ),
                                                         ),
                                                       ),
                                                       const SizedBox(width: 10),
@@ -951,10 +1038,10 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                                                           ),
                                                           style:
                                                               const TextStyle(
-                                                            color:
-                                                                Colors.white70,
-                                                            height: 1.3,
-                                                          ),
+                                                                color: Colors
+                                                                    .white70,
+                                                                height: 1.3,
+                                                              ),
                                                         ),
                                                       ),
                                                     ],
@@ -1048,8 +1135,7 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                           padding: EdgeInsets.all(24),
                           child: Text(
                             'No se pudo cargar la ruta.',
-                            style:
-                                TextStyle(color: Colors.white, fontSize: 16),
+                            style: TextStyle(color: Colors.white, fontSize: 16),
                           ),
                         ),
                       ),
