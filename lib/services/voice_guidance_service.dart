@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_compass/flutter_compass.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'route_guidance_builder.dart';
 import 'location_service.dart';
 import 'routing_service.dart';
 import 'haptic_service.dart';
@@ -33,23 +34,10 @@ class NavigationMessages {
   static String keepStraight(int meters) =>
       'Sigue en línea recta. Próxima indicación en $meters metros.';
 
-  static String passingLandmark(String landmark) =>
-      'Junto a $landmark.';
+  static String passingLandmark(String landmark) => 'Junto a $landmark.';
 
   static String noPointsForGuidance() =>
       'No hay suficientes puntos para guiar por voz.';
-}
-
-class GuidanceStep {
-  final RoutePoint endPoint;
-  final String instruction;
-  final double triggerDistanceMeters;
-
-  const GuidanceStep({
-    required this.endPoint,
-    required this.instruction,
-    required this.triggerDistanceMeters,
-  });
 }
 
 class _RouteLeg {
@@ -133,7 +121,8 @@ class VoiceGuidanceService extends ChangeNotifier {
       return _initialCalibratedHeadingDegrees;
     }
     if (_committedHeadingDegrees != null) return _committedHeadingDegrees;
-    if (_latestWalkingHeadingDegrees != null) return _latestWalkingHeadingDegrees;
+    if (_latestWalkingHeadingDegrees != null)
+      return _latestWalkingHeadingDegrees;
     if (_routeLegs.isNotEmpty) {
       final idx = _currentStepIndex < _routeLegs.length
           ? _currentStepIndex
@@ -261,9 +250,14 @@ class VoiceGuidanceService extends ChangeNotifier {
     _steps
       ..clear()
       ..addAll(
-        _buildStepsFromLegs(
-          _routeLegs,
+        RouteGuidanceBuilder.buildSteps(
+          polyline: _activePolyline,
+          destinationLat: _destinationLat,
+          destinationLng: _destinationLng,
+          destinationName: _destinationName,
+          landmarkResolver: _landmarkResolver,
           initialHeadingDegrees: initialHeadingDegrees,
+          minInstructionDistanceMeters: _minInstructionDistanceMeters,
         ),
       );
 
@@ -362,7 +356,9 @@ class VoiceGuidanceService extends ChangeNotifier {
       _currentStepIndex++;
 
       if (_currentStepIndex >= _steps.length) {
-        _currentInstruction = NavigationMessages.destinationReached(_destinationName);
+        _currentInstruction = NavigationMessages.destinationReached(
+          _destinationName,
+        );
         _status = 'Destino alcanzado';
         notifyListeners();
 
@@ -371,7 +367,8 @@ class VoiceGuidanceService extends ChangeNotifier {
 
         // HU-18: mensaje centralizado
         await _speakAndAnnounce(
-            NavigationMessages.destinationReached(_destinationName));
+          NavigationMessages.destinationReached(_destinationName),
+        );
         await stopNavigation(speak: false);
         return;
       }
@@ -396,8 +393,10 @@ class VoiceGuidanceService extends ChangeNotifier {
     final notAboutToTurn = distanceToStep > step.triggerDistanceMeters + 10;
 
     if (enoughTimeSinceLandmark && notAboutToTurn) {
-      final landmark =
-          _landmarkResolver?.call(current.latitude, current.longitude);
+      final landmark = _landmarkResolver?.call(
+        current.latitude,
+        current.longitude,
+      );
       if (landmark != null && landmark != _lastAnnouncedLandmark) {
         _lastAnnouncedLandmark = landmark;
         _lastLandmarkAt = now;
@@ -412,7 +411,8 @@ class VoiceGuidanceService extends ChangeNotifier {
       _movingReminderElapsed -= _reminderInterval;
       // HU-18: mensaje centralizado
       await _speakAndAnnounce(
-          NavigationMessages.keepStraight(distanceToStep.round()));
+        NavigationMessages.keepStraight(distanceToStep.round()),
+      );
     }
   }
 
@@ -421,9 +421,12 @@ class VoiceGuidanceService extends ChangeNotifier {
     double best = double.infinity;
     for (var i = 0; i < _activePolyline.length - 1; i++) {
       final d = _distanceToSegmentMeters(
-        lat, lng,
-        _activePolyline[i].latitude, _activePolyline[i].longitude,
-        _activePolyline[i + 1].latitude, _activePolyline[i + 1].longitude,
+        lat,
+        lng,
+        _activePolyline[i].latitude,
+        _activePolyline[i].longitude,
+        _activePolyline[i + 1].latitude,
+        _activePolyline[i + 1].longitude,
       );
       if (d < best) best = d;
     }
@@ -431,9 +434,12 @@ class VoiceGuidanceService extends ChangeNotifier {
   }
 
   double _distanceToSegmentMeters(
-    double pLat, double pLng,
-    double aLat, double aLng,
-    double bLat, double bLng,
+    double pLat,
+    double pLng,
+    double aLat,
+    double aLng,
+    double bLat,
+    double bLng,
   ) {
     const metersPerDegreeLat = 111320.0;
     final refLat = (aLat + bLat + pLat) / 3;
@@ -478,14 +484,24 @@ class VoiceGuidanceService extends ChangeNotifier {
     if (nextIdx >= _steps.length) return;
 
     final nextPoint = _steps[nextIdx].endPoint;
-    final dNext = _haversineMeters(lat, lng, nextPoint.latitude, nextPoint.longitude);
+    final dNext = _haversineMeters(
+      lat,
+      lng,
+      nextPoint.latitude,
+      nextPoint.longitude,
+    );
 
     // Solo avanzar si estamos muy cerca del endPoint del próximo paso (< 12 m)
     // y más cerca de ese punto que del endPoint del paso actual.
     if (dNext > 12) return;
 
     final currentPoint = _steps[_currentStepIndex].endPoint;
-    final dCurrent = _haversineMeters(lat, lng, currentPoint.latitude, currentPoint.longitude);
+    final dCurrent = _haversineMeters(
+      lat,
+      lng,
+      currentPoint.latitude,
+      currentPoint.longitude,
+    );
     if (dNext >= dCurrent) return;
 
     _currentStepIndex = nextIdx;
@@ -537,9 +553,14 @@ class VoiceGuidanceService extends ChangeNotifier {
     _steps
       ..clear()
       ..addAll(
-        _buildStepsFromLegs(
-          _routeLegs,
+        RouteGuidanceBuilder.buildSteps(
+          polyline: _activePolyline,
+          destinationLat: _destinationLat,
+          destinationLng: _destinationLng,
+          destinationName: _destinationName,
+          landmarkResolver: _landmarkResolver,
           initialHeadingDegrees: newInitialHeading,
+          minInstructionDistanceMeters: _minInstructionDistanceMeters,
         ),
       );
     _currentStepIndex = 0;
@@ -547,24 +568,28 @@ class VoiceGuidanceService extends ChangeNotifier {
     _status = 'Ruta actualizada hacia $_destinationName';
     _lastAnnouncedLandmark = null;
     _movingReminderElapsed = Duration.zero;
-    _lastHeadingSamplePoint = RoutePoint(latitude: originLat, longitude: originLng);
+    _lastHeadingSamplePoint = RoutePoint(
+      latitude: originLat,
+      longitude: originLng,
+    );
     _latestWalkingHeadingDegrees = null;
     _committedHeadingDegrees = null;
     notifyListeners();
 
     await _speakAndAnnounce(
-        NavigationMessages.routeUpdated(_steps.first.instruction));
+      NavigationMessages.routeUpdated(_steps.first.instruction),
+    );
   }
 
   // Calibración inicial de heading: pide caminar unos pasos y girar un poco.
   //
   // Estrategia:
-  //   1. Pide al usuario que camine y gire levemente.
-  //   2. En paralelo escucha el magnetómetro Y el GPS.
+  //   1. Pide al usuario que camine en línea recta unos pasos.
+  //   2. En paralelo escucha el magnetómetro como apoyo y el GPS como base.
   //   3. En cuanto el GPS detecta >= 2.5 m de desplazamiento, calcula el
-  //      bearing desde el movimiento real — eso es el heading más confiable.
-  //   4. Si el magnetómetro también tiene muestras consistentes, lo usa para
-  //      afinar (promedio ponderado 70% GPS / 30% magnetómetro).
+  //      bearing desde el movimiento real — eso es el heading principal.
+  //   4. Si el magnetómetro también tiene muestras consistentes, lo usa solo
+  //      para refinar el valor (promedio ponderado 90% GPS / 10% magnetómetro).
   //   5. Si después de 12 s no hubo suficiente movimiento, devuelve null
   //      y la primera instrucción será genérica ("avanza X metros").
   Future<double?> _calibrateInitialHeading() async {
@@ -572,13 +597,13 @@ class VoiceGuidanceService extends ChangeNotifier {
     if (loc == null) return null;
 
     await _speakAndAnnounce(
-      'Para orientarte, camina unos pasos en cualquier dirección y gira un poco.',
+      'Para orientarte, camina en línea recta unos pasos. Obteneré la dirección principalmente por GPS.',
     );
 
     final startPos = loc.currentLocation;
     if (startPos == null) return null;
 
-    // Escuchar magnetómetro en paralelo mientras el usuario camina.
+    // Escuchar magnetómetro en paralelo, pero dar prioridad al desplazamiento GPS.
     final compassSamples = <double>[];
     StreamSubscription<CompassEvent>? compassSub;
     final compassStream = FlutterCompass.events;
@@ -602,14 +627,22 @@ class VoiceGuidanceService extends ChangeNotifier {
         if (current == null) continue;
 
         final moved = _haversineMeters(
-          startPos.latitude, startPos.longitude,
-          current.latitude, current.longitude,
+          startPos.latitude,
+          startPos.longitude,
+          current.latitude,
+          current.longitude,
         );
 
         if (moved >= _minMovementMetersForInitialHeading) {
           gpsHeading = _bearingDegrees(
-            RoutePoint(latitude: startPos.latitude, longitude: startPos.longitude),
-            RoutePoint(latitude: current.latitude, longitude: current.longitude),
+            RoutePoint(
+              latitude: startPos.latitude,
+              longitude: startPos.longitude,
+            ),
+            RoutePoint(
+              latitude: current.latitude,
+              longitude: current.longitude,
+            ),
           );
           break;
         }
@@ -627,8 +660,8 @@ class VoiceGuidanceService extends ChangeNotifier {
       return null;
     }
 
-    // Si el magnetómetro tiene muestras consistentes, combinar con el GPS.
-    // 70% GPS (más fiable en exterior) + 30% magnetómetro (captura la rotación).
+    // Si el magnetómetro tiene muestras consistentes, combinarlo con el GPS,
+    // pero dejando al GPS como fuente principal del heading inicial.
     if (compassSamples.length >= _minHeadingSamples) {
       final compassMean = _circularMeanDegrees(compassSamples);
       final compassConsistent = compassSamples.every(
@@ -639,8 +672,8 @@ class VoiceGuidanceService extends ChangeNotifier {
         // Promedio circular ponderado
         final gpsRad = _toRad(gpsHeading);
         final compassRad = _toRad(compassMean);
-        final sinMean = 0.7 * sin(gpsRad) + 0.3 * sin(compassRad);
-        final cosMean = 0.7 * cos(gpsRad) + 0.3 * cos(compassRad);
+        final sinMean = 0.9 * sin(gpsRad) + 0.1 * sin(compassRad);
+        final cosMean = 0.9 * cos(gpsRad) + 0.1 * cos(compassRad);
         final combined = (atan2(sinMean, cosMean) * 180 / pi + 360) % 360;
         await _speakAndAnnounce('Orientación lista.');
         return combined;
@@ -742,7 +775,8 @@ class VoiceGuidanceService extends ChangeNotifier {
   void _commitHeadingOnTurnIfNeeded() {
     if (_currentStepIndex < 0 || _currentStepIndex >= _steps.length) return;
     final instruction = _steps[_currentStepIndex].instruction.toUpperCase();
-    final isTurn = instruction.contains('GIRA') || instruction.contains('MEDIA VUELTA');
+    final isTurn =
+        instruction.contains('GIRA') || instruction.contains('MEDIA VUELTA');
     if (!isTurn) return;
 
     if (_latestWalkingHeadingDegrees != null) {
@@ -931,8 +965,8 @@ class VoiceGuidanceService extends ChangeNotifier {
     }
 
     return delta > 0
-      ? 'GIRA a la derecha y avanza ${distanceMeters.round()} metros.'
-      : 'GIRA a la izquierda y avanza ${distanceMeters.round()} metros.';
+        ? 'GIRA a la derecha y avanza ${distanceMeters.round()} metros.'
+        : 'GIRA a la izquierda y avanza ${distanceMeters.round()} metros.';
   }
 
   String _turnWord(double delta) {

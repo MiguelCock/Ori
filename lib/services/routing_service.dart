@@ -51,6 +51,8 @@ class RoutingService extends ChangeNotifier {
   String get lastError => _lastError;
   RouteResult? get currentRoute => _currentRoute;
 
+  String? nearestNodeId(double lat, double lon) => _nearestNodeId(lat, lon);
+
   Future<void> load() async {
     if (_isLoaded) return;
     try {
