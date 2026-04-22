@@ -10,6 +10,7 @@ class LocationData {
   final double longitude;
   final double accuracy; // Precisión en metros
   final double speed; // Velocidad en m/s
+  final double? heading; // Orientación del dispositivo en grados
   final DateTime timestamp;
 
   LocationData({
@@ -17,6 +18,7 @@ class LocationData {
     required this.longitude,
     required this.accuracy,
     required this.speed,
+    required this.heading,
     required this.timestamp,
   });
 
@@ -27,12 +29,16 @@ class LocationData {
       longitude: position.longitude,
       accuracy: position.accuracy,
       speed: position.speed,
+      heading: position.heading.isFinite && position.heading >= 0
+          ? position.heading
+          : null,
       timestamp: position.timestamp,
     );
   }
 
   // Verificar si la ubicación es válida para navegación
-  bool get isValidForNavigation => accuracy <= 15.0; // Precisión mínima 15 metros
+  bool get isValidForNavigation =>
+      accuracy <= 15.0; // Precisión mínima 15 metros
 
   @override
   String toString() {
@@ -58,14 +64,15 @@ class LocationService extends ChangeNotifier {
   LocationStatus _status = LocationStatus.initializing;
   LocationData? _currentLocation;
   String _lastError = '';
-  
+
   Stream<Position>? _positionStream;
-  
+
   // Getters
   LocationStatus get status => _status;
   LocationData? get currentLocation => _currentLocation;
   String get lastError => _lastError;
-  bool get hasValidLocation => _currentLocation != null && _currentLocation!.isValidForNavigation;
+  bool get hasValidLocation =>
+      _currentLocation != null && _currentLocation!.isValidForNavigation;
 
   // Inicializar y comenzar a escuchar ubicación
   Future<void> initialize() async {
@@ -74,7 +81,9 @@ class LocationService extends ChangeNotifier {
       bool isLocationEnabled = await Geolocator.isLocationServiceEnabled();
       if (!isLocationEnabled) {
         _updateStatus(LocationStatus.disabled);
-        _announce('El GPS está desactivado. Actívalo en ajustes para usar la navegación.');
+        _announce(
+          'El GPS está desactivado. Actívalo en ajustes para usar la navegación.',
+        );
         return;
       }
 
@@ -91,13 +100,14 @@ class LocationService extends ChangeNotifier {
 
       if (permission == LocationPermission.deniedForever) {
         _updateStatus(LocationStatus.permissionDenied);
-        _announce('Permiso de ubicación bloqueado permanentemente. Ve a ajustes para activarlo.');
+        _announce(
+          'Permiso de ubicación bloqueado permanentemente. Ve a ajustes para activarlo.',
+        );
         return;
       }
 
       // Configurar y comenzar a escuchar ubicación
       await _startListening();
-
     } catch (e) {
       _lastError = 'Error al inicializar GPS: $e';
       _updateStatus(LocationStatus.noSignal);
@@ -115,13 +125,13 @@ class LocationService extends ChangeNotifier {
     final LocationSettings locationSettings = Platform.isAndroid
         ? AndroidSettings(
             accuracy: LocationAccuracy.bestForNavigation,
-            distanceFilter: 3, // metros — más frecuente que 5m para peatones
+            distanceFilter: 0,
             forceLocationManager: false, // Usar FusedLocationProvider
-            intervalDuration: const Duration(seconds: 1),
+            intervalDuration: const Duration(milliseconds: 500),
           )
         : const LocationSettings(
             accuracy: LocationAccuracy.bestForNavigation,
-            distanceFilter: 3,
+            distanceFilter: 0,
           );
 
     _positionStream = Geolocator.getPositionStream(
@@ -129,10 +139,7 @@ class LocationService extends ChangeNotifier {
     );
 
     // Escuchar actualizaciones
-    _positionStream!.listen(
-      _handlePositionUpdate,
-      onError: _handleError,
-    );
+    _positionStream!.listen(_handlePositionUpdate, onError: _handleError);
 
     // Obtener una ubicación inicial inmediata
     // timeLimit evita que la app se cuelgue si el GPS tarda en adquirir señal
@@ -151,20 +158,25 @@ class LocationService extends ChangeNotifier {
   // Manejar actualización de posición
   void _handlePositionUpdate(Position position) {
     // Filtro de calidad: si ya tenemos una posición buena (< 15m) y llega una
-    // muy mala (> 30m), la descartamos para evitar saltos bruscos en la ruta.
-    // Si aún no tenemos ninguna posición, aceptamos cualquier precisión.
+    // muy mala (> 50m), la descartamos para evitar saltos bruscos en la ruta.
+    // Umbral subido de 30m a 50m para no congelar la posición en campus
+    // donde el GPS fluctúa normalmente entre 15–35m entre edificios.
     if (_currentLocation != null &&
         _currentLocation!.accuracy < 15.0 &&
-        position.accuracy > 30.0) {
-      debugPrint('GPS: posición descartada (precisión ${position.accuracy.toStringAsFixed(1)}m > 30m, manteniendo la anterior).');
+        position.accuracy > 50.0) {
+      debugPrint(
+        'GPS: posición descartada (precisión ${position.accuracy.toStringAsFixed(1)}m > 50m, manteniendo la anterior).',
+      );
       return;
     }
 
     LocationData newLocation = LocationData.fromPosition(position);
+    final previousStatus = _status;
 
     // Determinar estado según precisión
-    final LocationStatus newStatus =
-        position.accuracy <= 15.0 ? LocationStatus.active : LocationStatus.lowAccuracy;
+    final LocationStatus newStatus = position.accuracy <= 15.0
+        ? LocationStatus.active
+        : LocationStatus.lowAccuracy;
 
     // Anunciar cambios importantes de estado
     if (_status != newStatus) {
@@ -175,7 +187,9 @@ class LocationService extends ChangeNotifier {
           }
           break;
         case LocationStatus.lowAccuracy:
-          _announce('Precisión GPS baja. La navegación puede ser menos precisa.');
+          _announce(
+            'Precisión GPS baja. La navegación puede ser menos precisa.',
+          );
           break;
         default:
           break;
@@ -184,6 +198,10 @@ class LocationService extends ChangeNotifier {
 
     _currentLocation = newLocation;
     _updateStatus(newStatus);
+
+    if (previousStatus == newStatus) {
+      notifyListeners();
+    }
   }
 
   // Manejar errores del stream
@@ -209,15 +227,15 @@ class LocationService extends ChangeNotifier {
 
   // Verificar si se puede iniciar navegación
   bool canStartNavigation() {
-    if (_status == LocationStatus.disabled || 
+    if (_status == LocationStatus.disabled ||
         _status == LocationStatus.permissionDenied) {
       return false;
     }
-    
-    if (_currentLocation == null || !_currentLocation!.isValidForNavigation) {
+
+    if (_currentLocation == null) {
       return false;
     }
-    
+
     return true;
   }
 

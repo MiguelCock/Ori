@@ -52,6 +52,16 @@ class CampusPlace {
   final double longitude;
   final List<String> categories;
   final List<List<double>>? polygon;
+
+  // HU-2: información básica
+  final String buildingType;
+  final String schedule;
+
+  // HU-3: información ampliada
+  final List<String> services;
+  final String accessibilityInfo;
+  final String extendedDescription;
+
   late final String searchableText;
 
   CampusPlace({
@@ -61,6 +71,11 @@ class CampusPlace {
     required this.longitude,
     required this.categories,
     this.polygon,
+    this.buildingType = '',
+    this.schedule = '',
+    this.services = const [],
+    this.accessibilityInfo = '',
+    this.extendedDescription = '',
   }) {
     searchableText = '$name $description'.toLowerCase();
   }
@@ -77,6 +92,33 @@ class CampusPlace {
   }
 
   double _rad(double deg) => deg * pi / 180;
+
+  Map<String, dynamic> basicInfo() {
+    return {
+      'nombre': name,
+      'tipo': buildingType.isEmpty ? 'No especificado' : buildingType,
+      'descripcion': description,
+      'horario': schedule.isEmpty ? 'Horario no disponible' : schedule,
+    };
+  }
+
+  Map<String, dynamic> extendedInfo() {
+    return {
+      'nombre': name,
+      'tipo': buildingType.isEmpty ? 'No especificado' : buildingType,
+      'descripcion': description,
+      'descripcion ampliada': extendedDescription.isEmpty
+          ? description
+          : extendedDescription,
+      'horario': schedule.isEmpty ? 'Horario no disponible' : schedule,
+      'servicios': services,
+      'accesibilidad': accessibilityInfo.isEmpty
+          ? 'Sin información de accesibilidad'
+          : accessibilityInfo,
+      'categorias': categories,
+      'coordenadas': '${latitude.toStringAsFixed(6)}, ${longitude.toStringAsFixed(6)}',
+    };
+  }
 
   @override
   String toString() => name;
