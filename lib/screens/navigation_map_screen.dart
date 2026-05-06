@@ -12,6 +12,7 @@ import '../services/location_service.dart';
 import '../services/route_guidance_builder.dart';
 import '../services/routing_service.dart';
 import '../services/voice_guidance_service.dart';
+import '../utils/accessibility_scale.dart';
 
 class NavigationMapScreen extends StatefulWidget {
   final String destinationName;
@@ -709,6 +710,9 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final textScaler = clampedTextScaler(context);
+    final titleScaler = clampedTextScaler(context, maxScale: 1.3);
+    final textScale = clampScaleFactor(context, maxScale: 1.5);
     final geo = Provider.of<GeoJsonService>(context, listen: false);
     final polygons = _buildCampusPolygons(geo);
     final polygonLabels = _buildPolygonLabels(geo);
@@ -777,7 +781,8 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
         backgroundColor: const Color(0xFF0D1B2A),
         body: LayoutBuilder(
           builder: (context, constraints) {
-            final mapHeight = constraints.maxHeight / 3;
+            final mapHeight =
+                constraints.maxHeight * (textScale > 1.3 ? 0.28 : 1 / 3);
             final topHeight = constraints.maxHeight - mapHeight;
 
             return Stack(
@@ -788,7 +793,12 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                       height: topHeight,
                       child: SafeArea(
                         child: Padding(
-                          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                          padding: EdgeInsets.fromLTRB(
+                            responsiveSpace(context, 12),
+                            responsiveSpace(context, 8),
+                            responsiveSpace(context, 12),
+                            responsiveSpace(context, 8),
+                          ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
@@ -802,6 +812,10 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                                       color: const Color(0xCC1A237E),
                                       borderRadius: BorderRadius.circular(12),
                                       child: IconButton(
+                                        constraints: const BoxConstraints(
+                                          minWidth: 48,
+                                          minHeight: 48,
+                                        ),
                                         onPressed: _cancelNavigation,
                                         icon: const Icon(
                                           Icons.close_rounded,
@@ -826,6 +840,7 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                                       ),
                                       child: Text(
                                         _normalizeText(widget.destinationName),
+                                        textScaler: titleScaler,
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
                                         style: const TextStyle(
@@ -843,6 +858,10 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                                       color: const Color(0xCC1A237E),
                                       borderRadius: BorderRadius.circular(12),
                                       child: IconButton(
+                                        constraints: const BoxConstraints(
+                                          minWidth: 48,
+                                          minHeight: 48,
+                                        ),
                                         onPressed: _openGuidanceSettings,
                                         icon: const Icon(
                                           Icons.tune_rounded,
@@ -871,6 +890,9 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                                     ),
                                     child: Text(
                                       'Filtro: ${_normalizeText(selectedLabel)}',
+                                      textScaler: textScaler,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(
                                         color: Colors.white70,
                                         fontSize: 12,
@@ -891,165 +913,182 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                                     borderRadius: BorderRadius.circular(18),
                                     border: Border.all(color: Colors.white24),
                                   ),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      // Chips de métricas
-                                      Row(
-                                        children: [
-                                          // HU-16: chip de distancia restante
-                                          Expanded(
-                                            child: Semantics(
-                                              label:
-                                                  _remainingDistanceMeters ==
-                                                      null
-                                                  ? 'Distancia restante no disponible'
-                                                  : 'Distancia restante: ${_formatDistance(_remainingDistanceMeters!)}',
-                                              child: _MetricChip(
-                                                icon: Icons.straighten_rounded,
-                                                label: 'Distancia restante',
-                                                value:
+                                  child: SingleChildScrollView(
+                                    physics: const ClampingScrollPhysics(),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        // Chips de métricas
+                                        Row(
+                                          children: [
+                                            // HU-16: chip de distancia restante
+                                            Expanded(
+                                              child: Semantics(
+                                                label:
                                                     _remainingDistanceMeters ==
                                                         null
-                                                    ? '--'
-                                                    : _formatDistance(
-                                                        _remainingDistanceMeters!,
-                                                      ),
-                                              ),
-                                            ),
-                                          ),
-                                          const SizedBox(width: 10),
-                                          Expanded(
-                                            child: _MetricChip(
-                                              icon: Icons.gps_fixed_rounded,
-                                              label: 'Error GPS',
-                                              value: _formatAccuracy(
-                                                _locationService
-                                                    ?.currentLocation
-                                                    ?.accuracy,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-
-                                      const SizedBox(height: 10),
-
-                                      // HU-16: botón "¿Cuánto falta?"
-                                      Semantics(
-                                        button: true,
-                                        label: 'Escuchar distancia restante',
-                                        hint:
-                                            'Toca dos veces para escuchar cuánto falta para llegar',
-                                        child: SizedBox(
-                                          width: double.infinity,
-                                          child: OutlinedButton.icon(
-                                            onPressed: () => _voiceService
-                                                ?.announceRemainingDistance(),
-                                            icon: const Icon(
-                                              Icons.record_voice_over_rounded,
-                                              size: 18,
-                                            ),
-                                            label: const Text('¿Cuánto falta?'),
-                                            style: OutlinedButton.styleFrom(
-                                              foregroundColor: Colors.white,
-                                              side: const BorderSide(
-                                                color: Color(0xFF82B1FF),
-                                              ),
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    vertical: 10,
-                                                  ),
-                                              textStyle: const TextStyle(
-                                                fontSize: 13,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-
-                                      const SizedBox(height: 14),
-
-                                      const Text(
-                                        'Próximas indicaciones',
-                                        style: TextStyle(
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Expanded(
-                                        child: nextSteps.isEmpty
-                                            ? Align(
-                                                alignment: Alignment.topLeft,
-                                                child: Text(
-                                                  _waitingExitPolygon != null
-                                                      ? waitingExitText
-                                                      : 'Sin indicaciones disponibles todavía.',
-                                                  style: const TextStyle(
-                                                    color: Colors.white60,
-                                                  ),
+                                                    ? 'Distancia restante no disponible'
+                                                    : 'Distancia restante: ${_formatDistance(_remainingDistanceMeters!)}',
+                                                child: _MetricChip(
+                                                  icon:
+                                                      Icons.straighten_rounded,
+                                                  label: 'Distancia restante',
+                                                  value:
+                                                      _remainingDistanceMeters ==
+                                                          null
+                                                      ? '--'
+                                                      : _formatDistance(
+                                                          _remainingDistanceMeters!,
+                                                        ),
                                                 ),
-                                              )
-                                            : ListView.separated(
-                                                itemCount: nextSteps.length,
-                                                separatorBuilder: (_, __) =>
-                                                    const SizedBox(height: 8),
-                                                itemBuilder: (context, i) {
-                                                  return Row(
-                                                    crossAxisAlignment:
-                                                        CrossAxisAlignment
-                                                            .start,
-                                                    children: [
-                                                      Container(
-                                                        width: 22,
-                                                        height: 22,
-                                                        alignment:
-                                                            Alignment.center,
-                                                        decoration: BoxDecoration(
-                                                          color: const Color(
-                                                            0xFF1565C0,
-                                                          ),
-                                                          borderRadius:
-                                                              BorderRadius.circular(
-                                                                11,
-                                                              ),
-                                                        ),
-                                                        child: Text(
-                                                          '${i + 1}',
-                                                          style:
-                                                              const TextStyle(
-                                                                color: Colors
-                                                                    .white,
-                                                                fontSize: 12,
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .bold,
-                                                              ),
-                                                        ),
-                                                      ),
-                                                      const SizedBox(width: 10),
-                                                      Expanded(
-                                                        child: Text(
-                                                          _normalizeText(
-                                                            nextSteps[i]
-                                                                .instruction,
-                                                          ),
-                                                          style:
-                                                              const TextStyle(
-                                                                color: Colors
-                                                                    .white70,
-                                                                height: 1.3,
-                                                              ),
-                                                        ),
-                                                      ),
-                                                    ],
-                                                  );
-                                                },
                                               ),
-                                      ),
-                                    ],
+                                            ),
+                                            const SizedBox(width: 10),
+                                            Expanded(
+                                              child: _MetricChip(
+                                                icon: Icons.gps_fixed_rounded,
+                                                label: 'Error GPS',
+                                                value: _formatAccuracy(
+                                                  _locationService
+                                                      ?.currentLocation
+                                                      ?.accuracy,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+
+                                        const SizedBox(height: 10),
+
+                                        // HU-16: botón "¿Cuánto falta?"
+                                        Semantics(
+                                          button: true,
+                                          label: 'Escuchar distancia restante',
+                                          hint:
+                                              'Toca dos veces para escuchar cuánto falta para llegar',
+                                          child: SizedBox(
+                                            width: double.infinity,
+                                            child: OutlinedButton.icon(
+                                              onPressed: () => _voiceService
+                                                  ?.announceRemainingDistance(),
+                                              icon: const Icon(
+                                                Icons.record_voice_over_rounded,
+                                                size: 18,
+                                              ),
+                                              label: FittedBox(
+                                                fit: BoxFit.scaleDown,
+                                                child: Text(
+                                                  '¿Cuánto falta?',
+                                                  textScaler: textScaler,
+                                                ),
+                                              ),
+                                              style: OutlinedButton.styleFrom(
+                                                foregroundColor: Colors.white,
+                                                side: const BorderSide(
+                                                  color: Color(0xFF82B1FF),
+                                                ),
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      vertical: 10,
+                                                    ),
+                                                minimumSize: const Size(
+                                                  double.infinity,
+                                                  48,
+                                                ),
+                                                textStyle: const TextStyle(
+                                                  fontSize: 13,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+
+                                        const SizedBox(height: 14),
+
+                                        Text(
+                                          'Próximas indicaciones',
+                                          textScaler: textScaler,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        if (nextSteps.isEmpty)
+                                          Align(
+                                            alignment: Alignment.topLeft,
+                                            child: Text(
+                                              _waitingExitPolygon != null
+                                                  ? waitingExitText
+                                                  : 'Sin indicaciones disponibles todavía.',
+                                              textScaler: textScaler,
+                                              softWrap: true,
+                                              style: const TextStyle(
+                                                color: Colors.white60,
+                                              ),
+                                            ),
+                                          )
+                                        else
+                                          ListView.separated(
+                                            shrinkWrap: true,
+                                            physics:
+                                                const NeverScrollableScrollPhysics(),
+                                            itemCount: nextSteps.length,
+                                            separatorBuilder: (_, __) =>
+                                                const SizedBox(height: 8),
+                                            itemBuilder: (context, i) {
+                                              return Row(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Container(
+                                                    width: 22,
+                                                    height: 22,
+                                                    alignment: Alignment.center,
+                                                    decoration: BoxDecoration(
+                                                      color: const Color(
+                                                        0xFF1565C0,
+                                                      ),
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            11,
+                                                          ),
+                                                    ),
+                                                    child: Text(
+                                                      '${i + 1}',
+                                                      textScaler: textScaler,
+                                                      style: const TextStyle(
+                                                        color: Colors.white,
+                                                        fontSize: 12,
+                                                        fontWeight:
+                                                            FontWeight.bold,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 10),
+                                                  Expanded(
+                                                    child: Text(
+                                                      _normalizeText(
+                                                        nextSteps[i]
+                                                            .instruction,
+                                                      ),
+                                                      textScaler: textScaler,
+                                                      softWrap: true,
+                                                      style: const TextStyle(
+                                                        color: Colors.white70,
+                                                        height: 1.3,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              );
+                                            },
+                                          ),
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ),
@@ -1060,58 +1099,61 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                     ),
 
                     // Mapa en el tercio inferior
-                    SizedBox(
-                      height: mapHeight,
-                      width: double.infinity,
-                      child: ClipRRect(
-                        borderRadius: const BorderRadius.only(
-                          topLeft: Radius.circular(18),
-                          topRight: Radius.circular(18),
-                        ),
-                        child: FlutterMap(
-                          mapController: _mapController,
-                          options: MapOptions(
-                            initialCenter: _currentUser,
-                            initialZoom: _currentZoom,
-                            minZoom: minZoom,
-                            maxZoom: maxZoom,
-                            interactionOptions: const InteractionOptions(
-                              flags:
-                                  InteractiveFlag.drag |
-                                  InteractiveFlag.pinchZoom |
-                                  InteractiveFlag.doubleTapZoom |
-                                  InteractiveFlag.scrollWheelZoom,
-                            ),
-                            onPositionChanged: (camera, hasGesture) {
-                              _currentZoom = camera.zoom;
-                            },
+                    SafeArea(
+                      top: false,
+                      child: SizedBox(
+                        height: mapHeight,
+                        width: double.infinity,
+                        child: ClipRRect(
+                          borderRadius: const BorderRadius.only(
+                            topLeft: Radius.circular(18),
+                            topRight: Radius.circular(18),
                           ),
-                          children: [
-                            TileLayer(
-                              urlTemplate:
-                                  'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                              userAgentPackageName: 'campus_guia',
+                          child: FlutterMap(
+                            mapController: _mapController,
+                            options: MapOptions(
+                              initialCenter: _currentUser,
+                              initialZoom: _currentZoom,
+                              minZoom: minZoom,
+                              maxZoom: maxZoom,
+                              interactionOptions: const InteractionOptions(
+                                flags:
+                                    InteractiveFlag.drag |
+                                    InteractiveFlag.pinchZoom |
+                                    InteractiveFlag.doubleTapZoom |
+                                    InteractiveFlag.scrollWheelZoom,
+                              ),
+                              onPositionChanged: (camera, hasGesture) {
+                                _currentZoom = camera.zoom;
+                              },
                             ),
-                            if (polygons.isNotEmpty)
-                              PolygonLayer(polygons: polygons),
-                            if (_routePoints.length >= 2)
-                              PolylineLayer(
-                                polylines: [
-                                  Polyline(
-                                    points: _routePoints,
-                                    strokeWidth: 5,
-                                    color: const Color(0xFF1976D2),
-                                  ),
+                            children: [
+                              TileLayer(
+                                urlTemplate:
+                                    'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                userAgentPackageName: 'campus_guia',
+                              ),
+                              if (polygons.isNotEmpty)
+                                PolygonLayer(polygons: polygons),
+                              if (_routePoints.length >= 2)
+                                PolylineLayer(
+                                  polylines: [
+                                    Polyline(
+                                      points: _routePoints,
+                                      strokeWidth: 5,
+                                      color: const Color(0xFF1976D2),
+                                    ),
+                                  ],
+                                ),
+                              MarkerLayer(
+                                markers: [
+                                  ...polygonLabels,
+                                  ...routeNodeMarkers,
+                                  userMarker,
                                 ],
                               ),
-                            MarkerLayer(
-                              markers: [
-                                ...polygonLabels,
-                                ...routeNodeMarkers,
-                                userMarker,
-                              ],
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
                     ),
