@@ -21,6 +21,12 @@ class NavigationMessages {
 
   static String navigationStopped() => 'Navegación detenida.';
 
+  static String navigationPaused() => 'Navegación pausada';
+
+  static String navigationResumed() => 'Navegación reanudada';
+
+  static String navigationFinished() => 'Navegación finalizada';
+
   static String destinationReached(String destination) =>
       'Has llegado a $destination. Navegación finalizada.';
 
@@ -70,6 +76,7 @@ class VoiceGuidanceService extends ChangeNotifier {
 
   bool _ttsReady = false;
   bool _isNavigating = false;
+  bool _isPaused = false;
   String _status = 'Navegación por voz inactiva';
   String _currentInstruction = '';
 
@@ -124,6 +131,7 @@ class VoiceGuidanceService extends ChangeNotifier {
   double _minInstructionDistanceMeters = 12;
 
   bool get isNavigating => _isNavigating;
+  bool get isPaused => _isPaused;
   String get status => _status;
   String get currentInstruction => _currentInstruction;
   int get remainingSteps => max(0, _steps.length - _currentStepIndex);
@@ -240,7 +248,11 @@ class VoiceGuidanceService extends ChangeNotifier {
 
   // ── HU-16: Anuncia en voz cuánto falta ──
   Future<void> announceRemainingDistance() async {
-    if (!_isNavigating || _locationService?.currentLocation == null) return;
+    if (!_isNavigating ||
+        _isPaused ||
+        _locationService?.currentLocation == null) {
+      return;
+    }
     final loc = _locationService!.currentLocation!;
     final dist = getRemainingDistance(loc.latitude, loc.longitude);
     if (dist <= 0) return;
@@ -248,6 +260,44 @@ class VoiceGuidanceService extends ChangeNotifier {
         ? 'Te faltan ${(dist / 1000).toStringAsFixed(1)} kilómetros para llegar a $_destinationName.'
         : 'Te faltan ${dist.round()} metros para llegar a $_destinationName.';
     await _speakAndAnnounce(text);
+  }
+
+  void _replaceActiveRoute(
+    RouteResult route, {
+    required double? initialHeadingDegrees,
+  }) {
+    _activePolyline = List<RoutePoint>.from(route.polyline);
+    _routeLegs
+      ..clear()
+      ..addAll(_compactRouteLegs(_activePolyline));
+    _steps
+      ..clear()
+      ..addAll(
+        RouteGuidanceBuilder.buildSteps(
+          polyline: _activePolyline,
+          destinationLat: _destinationLat,
+          destinationLng: _destinationLng,
+          destinationName: _destinationName,
+          landmarkResolver: _landmarkResolver,
+          initialHeadingDegrees: initialHeadingDegrees,
+          minInstructionDistanceMeters: _minInstructionDistanceMeters,
+        ),
+      );
+    _currentStepIndex = 0;
+    _currentInstruction = _steps.isEmpty ? '' : _steps.first.instruction;
+  }
+
+  RoutePoint? _currentNavigationPoint(RouteResult route) {
+    final current = _locationService?.currentLocation;
+    if (current != null) {
+      return RoutePoint(
+        latitude: current.latitude,
+        longitude: current.longitude,
+      );
+    }
+
+    if (route.polyline.isEmpty) return null;
+    return route.polyline.first;
   }
 
   Future<void> startNavigation({
@@ -283,23 +333,7 @@ class VoiceGuidanceService extends ChangeNotifier {
     final double? initialHeadingDegrees = await _calibrateInitialHeading();
     _initialCalibratedHeadingDegrees = initialHeadingDegrees;
 
-    _activePolyline = List<RoutePoint>.from(route.polyline);
-    _routeLegs
-      ..clear()
-      ..addAll(_compactRouteLegs(_activePolyline));
-    _steps
-      ..clear()
-      ..addAll(
-        RouteGuidanceBuilder.buildSteps(
-          polyline: _activePolyline,
-          destinationLat: _destinationLat,
-          destinationLng: _destinationLng,
-          destinationName: _destinationName,
-          landmarkResolver: _landmarkResolver,
-          initialHeadingDegrees: initialHeadingDegrees,
-          minInstructionDistanceMeters: _minInstructionDistanceMeters,
-        ),
-      );
+    _replaceActiveRoute(route, initialHeadingDegrees: initialHeadingDegrees);
 
     if (_steps.isEmpty) {
       _status = NavigationMessages.noPointsForGuidance();
@@ -307,20 +341,12 @@ class VoiceGuidanceService extends ChangeNotifier {
       return;
     }
 
-    _currentStepIndex = 0;
     _isNavigating = true;
+    _isPaused = false;
     _status = 'Navegación activa hacia $_destinationName';
-    _currentInstruction = _steps.first.instruction;
     _movingReminderElapsed = Duration.zero;
     _lastReminderSampleAt = DateTime.now();
-    _lastReminderSamplePoint = RoutePoint(
-      latitude:
-          _locationService?.currentLocation?.latitude ??
-          route.polyline.first.latitude,
-      longitude:
-          _locationService?.currentLocation?.longitude ??
-          route.polyline.first.longitude,
-    );
+    _lastReminderSamplePoint = _currentNavigationPoint(route);
     _lastHeadingSamplePoint = _lastReminderSamplePoint;
     _latestWalkingHeadingDegrees = null;
     _committedHeadingDegrees = null;
@@ -339,6 +365,74 @@ class VoiceGuidanceService extends ChangeNotifier {
     );
   }
 
+  Future<void> pauseNavigation({bool speak = true}) async {
+    if (!_isNavigating || _isPaused) return;
+
+    _locationService?.removeListener(_onLocationChanged);
+    _isPaused = true;
+    _status = NavigationMessages.navigationPaused();
+    notifyListeners();
+
+    await _tts.stop();
+    if (speak) {
+      await _speakAndAnnounce(NavigationMessages.navigationPaused());
+    }
+  }
+
+  Future<void> resumeNavigation({RouteResult? route, bool speak = true}) async {
+    if (!_isNavigating && route == null) return;
+
+    if (route != null) {
+      final double? resumeHeadingDegrees = route.polyline.length >= 2
+          ? _bearingDegrees(route.polyline[0], route.polyline[1])
+          : mapReferenceHeadingDegrees;
+      _replaceActiveRoute(route, initialHeadingDegrees: resumeHeadingDegrees);
+    }
+
+    if (_steps.isEmpty) {
+      _status = NavigationMessages.noPointsForGuidance();
+      notifyListeners();
+      return;
+    }
+
+    final current = _locationService?.currentLocation;
+    final RoutePoint? resumePoint = current == null
+        ? (_activePolyline.isEmpty ? null : _activePolyline.first)
+        : RoutePoint(latitude: current.latitude, longitude: current.longitude);
+
+    _isNavigating = true;
+    _isPaused = false;
+    _status = 'Navegación activa hacia $_destinationName';
+    _movingReminderElapsed = Duration.zero;
+    _lastReminderSampleAt = DateTime.now();
+    _lastReminderSamplePoint = resumePoint;
+    _lastHeadingSamplePoint = resumePoint;
+    _latestWalkingHeadingDegrees = null;
+    _committedHeadingDegrees = null;
+    _lastAnnouncedLandmark = null;
+    _lastLandmarkAt = DateTime.fromMillisecondsSinceEpoch(0);
+    _arrivalHandled = false;
+    _arrivalHapticTriggered = false;
+
+    _locationService?.removeListener(_onLocationChanged);
+    _locationService?.addListener(_onLocationChanged);
+    notifyListeners();
+
+    if (speak) {
+      final message = _currentInstruction.isEmpty
+          ? NavigationMessages.navigationResumed()
+          : '${NavigationMessages.navigationResumed()}. $_currentInstruction';
+      await _speakAndAnnounce(message);
+    }
+  }
+
+  Future<void> finishNavigation({bool speak = true}) async {
+    if (speak) {
+      await _speakAndAnnounce(NavigationMessages.navigationFinished());
+    }
+    await stopNavigation(speak: false);
+  }
+
   Future<void> stopNavigation({bool speak = true}) async {
     _locationService?.removeListener(_onLocationChanged);
     _locationService = null;
@@ -350,6 +444,7 @@ class VoiceGuidanceService extends ChangeNotifier {
     _activePolyline = [];
     _currentStepIndex = 0;
     _isNavigating = false;
+    _isPaused = false;
     _currentInstruction = '';
     _status = 'Navegación por voz inactiva';
     _lastAnnouncedLandmark = null;
@@ -373,7 +468,11 @@ class VoiceGuidanceService extends ChangeNotifier {
   }
 
   Future<void> _onLocationChanged() async {
-    if (!_isNavigating || _locationService?.currentLocation == null) return;
+    if (!_isNavigating ||
+        _isPaused ||
+        _locationService?.currentLocation == null) {
+      return;
+    }
 
     final current = _locationService!.currentLocation!;
     final now = DateTime.now();

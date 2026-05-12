@@ -51,6 +51,9 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
   bool _isLoading = true;
   bool _hasError = false;
   bool _voiceStarted = false;
+  bool _isNavigationPaused = false;
+  bool _isResumingNavigation = false;
+  String? _navigationLiveMessage;
 
   late LatLng _destination;
   late LatLng _currentUser;
@@ -418,9 +421,10 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     }
   }
 
-  Future<void> _recalculateLocalRoute({
+  Future<RouteResult?> _recalculateLocalRoute({
     required LatLng newOrigin,
     bool force = false,
+    bool announceReroute = true,
   }) async {
     final now = DateTime.now();
     final enoughTime =
@@ -436,15 +440,15 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     final offRouteDistance = _distanceToRouteMeters(newOrigin, _routePoints);
     final isOffRoute = offRouteDistance > _maxDistanceFromRouteMeters;
 
-    if (!force && !enoughTime) return;
+    if (!force && !enoughTime) return _activeRoute;
     if (!force &&
         !(isOffRoute ||
             movedSinceLastOrigin >= _minMoveToOptionalRerouteMeters)) {
-      return;
+      return _activeRoute;
     }
 
     final routing = _routingService;
-    if (routing == null) return;
+    if (routing == null) return null;
 
     _lastRouteOrigin = newOrigin;
     _lastRouteUpdate = now;
@@ -466,26 +470,31 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
       destinationPolygon: widget.destinationPolygon,
     );
 
-    if (!mounted) return;
+    if (!mounted) return null;
     if (updated == null) {
       setState(() {
         _hasError = true;
         _isLoading = false;
       });
-      return;
+      return null;
     }
 
     _applyLocalRoute(updated);
 
-    if (now.difference(_lastAnnouncedReroute) >= _minTimeBetweenAnnouncements) {
+    if (announceReroute &&
+        now.difference(_lastAnnouncedReroute) >= _minTimeBetweenAnnouncements) {
       _lastAnnouncedReroute = now;
       _announce('Ruta local recalculada por cambio de ubicación.');
     }
+
+    return updated;
   }
 
   void _onLocationChanged() {
     final here = _locationService?.currentLocation;
     if (here == null) return;
+    if (_isNavigationPaused) return;
+
     final next = LatLng(here.latitude, here.longitude);
 
     if (!mounted) return;
@@ -686,7 +695,7 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     }
 
     final here = _locationService?.currentLocation;
-    if (here != null) {
+    if (here != null && !_isNavigationPaused) {
       _currentUser = LatLng(here.latitude, here.longitude);
       _lastRouteOrigin = _currentUser;
     }
@@ -698,14 +707,222 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     super.dispose();
   }
 
-  Future<void> _cancelNavigation() async {
-    HapticFeedback.heavyImpact();
+  void _setNavigationLiveMessage(String message) {
+    if (!mounted) return;
+    setState(() {
+      _navigationLiveMessage = message;
+    });
+  }
+
+  Future<void> _pauseNavigation() async {
+    if (_isNavigationPaused) return;
+
+    HapticFeedback.mediumImpact();
+    setState(() {
+      _isNavigationPaused = true;
+      _isLoading = false;
+      _navigationLiveMessage = NavigationMessages.navigationPaused();
+    });
+
+    await _voiceService?.pauseNavigation(speak: false);
+    await _announceAndSpeak(NavigationMessages.navigationPaused());
+  }
+
+  Future<void> _resumeNavigation() async {
+    if (!_isNavigationPaused || _isResumingNavigation) return;
+
+    final here = _locationService?.currentLocation;
+    final origin = here == null
+        ? _currentUser
+        : LatLng(here.latitude, here.longitude);
+
+    HapticFeedback.mediumImpact();
+    setState(() {
+      _isResumingNavigation = true;
+      _isLoading = true;
+      _hasError = false;
+      _currentUser = origin;
+    });
+
+    final resumedRoute = await _recalculateLocalRoute(
+      newOrigin: origin,
+      force: true,
+      announceReroute: false,
+    );
+
+    if (!mounted) return;
+    if (resumedRoute == null) {
+      setState(() {
+        _isResumingNavigation = false;
+        _isLoading = false;
+        _hasError = true;
+      });
+      await _announceAndSpeak('No se pudo reanudar la navegación.');
+      return;
+    }
+
     final voice = _voiceService;
-    if (voice != null) {
-      await voice.stopNavigation();
+    if (voice != null && voice.isNavigating) {
+      await voice.resumeNavigation(route: resumedRoute, speak: false);
+    } else {
+      _voiceStarted = false;
+      await _startVoiceGuidanceIfNeeded();
     }
     if (!mounted) return;
+
+    setState(() {
+      _isNavigationPaused = false;
+      _isResumingNavigation = false;
+      _isLoading = false;
+      _navigationLiveMessage = NavigationMessages.navigationResumed();
+    });
+
+    final currentInstruction = _voiceService?.currentInstruction ?? '';
+    final message = currentInstruction.isEmpty
+        ? NavigationMessages.navigationResumed()
+        : '${NavigationMessages.navigationResumed()}. $currentInstruction';
+    await _announceAndSpeak(message);
+  }
+
+  Future<void> _finishNavigation() async {
+    HapticFeedback.heavyImpact();
+    _setNavigationLiveMessage(NavigationMessages.navigationFinished());
+
+    final voice = _voiceService;
+    await _announceAndSpeak(NavigationMessages.navigationFinished());
+    await voice?.finishNavigation(speak: false);
+    _routingService?.clearCurrentRoute();
+
+    if (!mounted) return;
+    setState(() {
+      _isNavigationPaused = false;
+      _isResumingNavigation = false;
+      _voiceStarted = false;
+      _activeRoute = null;
+      _routePoints = [];
+      _routeSteps = [];
+      _routeDistanceMeters = null;
+      _remainingDistanceMeters = null;
+      _waitingExitPlaceName = null;
+      _waitingExitPolygon = null;
+      _waitingExitOutsideSamples = 0;
+    });
+
     Navigator.of(context).pop();
+  }
+
+  Widget _buildNavigationLiveRegion(TextScaler textScaler) {
+    final message = _navigationLiveMessage;
+    if (message == null) return const SizedBox.shrink();
+
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      label: message,
+      child: ExcludeSemantics(
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: _isNavigationPaused
+                ? const Color(0xFF5D4037).withValues(alpha: 0.50)
+                : const Color(0xFF1B5E20).withValues(alpha: 0.42),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: Text(
+            message,
+            textScaler: textScaler,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w700,
+              fontSize: 13,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRouteControlButton({
+    required String label,
+    required String semanticsLabel,
+    required String hint,
+    required IconData icon,
+    required VoidCallback? onPressed,
+    Color color = const Color(0xFF82B1FF),
+  }) {
+    return Semantics(
+      button: true,
+      enabled: onPressed != null,
+      label: semanticsLabel,
+      hint: hint,
+      onTap: onPressed,
+      child: ExcludeSemantics(
+        child: OutlinedButton.icon(
+          onPressed: onPressed,
+          icon: Icon(icon, size: 18),
+          label: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(label, maxLines: 1),
+          ),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: color,
+            disabledForegroundColor: Colors.white38,
+            side: BorderSide(color: onPressed == null ? Colors.white24 : color),
+            minimumSize: const Size(0, 48),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+            textStyle: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNavigationControls() {
+    return Row(
+      children: [
+        Expanded(
+          child: _buildRouteControlButton(
+            label: 'Pausar',
+            semanticsLabel: 'Pausar navegación',
+            hint: 'Detiene temporalmente las instrucciones de guía.',
+            icon: Icons.pause_circle_filled_rounded,
+            onPressed: _isNavigationPaused || _isResumingNavigation
+                ? null
+                : _pauseNavigation,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _buildRouteControlButton(
+            label: 'Reanudar',
+            semanticsLabel: 'Reanudar navegación',
+            hint: 'Continúa la ruta desde tu ubicación actual.',
+            icon: Icons.play_circle_fill_rounded,
+            onPressed: !_isNavigationPaused || _isResumingNavigation
+                ? null
+                : _resumeNavigation,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _buildRouteControlButton(
+            label: 'Finalizar',
+            semanticsLabel: 'Finalizar navegación',
+            hint: 'Cancela la ruta activa y vuelve a la pantalla principal.',
+            icon: Icons.stop_circle_rounded,
+            color: const Color(0xFFFF8A80),
+            onPressed: _finishNavigation,
+          ),
+        ),
+      ],
+    );
   }
 
   @override
@@ -774,7 +991,7 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
 
     return WillPopScope(
       onWillPop: () async {
-        await _cancelNavigation();
+        await _finishNavigation();
         return false;
       },
       child: Scaffold(
@@ -802,12 +1019,12 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              // Fila: botón cancelar + nombre destino
+                              // Fila: botón finalizar + nombre destino
                               Row(
                                 children: [
                                   Semantics(
                                     button: true,
-                                    label: 'Cancelar ruta',
+                                    label: 'Finalizar navegación',
                                     child: Material(
                                       color: const Color(0xCC1A237E),
                                       borderRadius: BorderRadius.circular(12),
@@ -816,9 +1033,9 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                                           minWidth: 48,
                                           minHeight: 48,
                                         ),
-                                        onPressed: _cancelNavigation,
+                                        onPressed: _finishNavigation,
                                         icon: const Icon(
-                                          Icons.close_rounded,
+                                          Icons.stop_circle_rounded,
                                           color: Colors.white,
                                         ),
                                       ),
@@ -919,6 +1136,12 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
                                       children: [
+                                        _buildNavigationLiveRegion(textScaler),
+                                        if (_navigationLiveMessage != null)
+                                          const SizedBox(height: 10),
+                                        _buildNavigationControls(),
+                                        const SizedBox(height: 12),
+
                                         // Chips de métricas
                                         Row(
                                           children: [
@@ -964,14 +1187,24 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                                         // HU-16: botón "¿Cuánto falta?"
                                         Semantics(
                                           button: true,
-                                          label: 'Escuchar distancia restante',
-                                          hint:
-                                              'Toca dos veces para escuchar cuánto falta para llegar',
+                                          enabled:
+                                              !_isNavigationPaused &&
+                                              !_isResumingNavigation,
+                                          label: _isNavigationPaused
+                                              ? 'Escuchar distancia restante no disponible mientras la navegación está pausada'
+                                              : 'Escuchar distancia restante',
+                                          hint: _isNavigationPaused
+                                              ? 'Reanuda la navegación para escuchar la distancia restante.'
+                                              : 'Toca dos veces para escuchar cuánto falta para llegar',
                                           child: SizedBox(
                                             width: double.infinity,
                                             child: OutlinedButton.icon(
-                                              onPressed: () => _voiceService
-                                                  ?.announceRemainingDistance(),
+                                              onPressed:
+                                                  _isNavigationPaused ||
+                                                      _isResumingNavigation
+                                                  ? null
+                                                  : () => _voiceService
+                                                        ?.announceRemainingDistance(),
                                               icon: const Icon(
                                                 Icons.record_voice_over_rounded,
                                                 size: 18,
