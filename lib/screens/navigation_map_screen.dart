@@ -367,6 +367,12 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     }
 
     _voiceStarted = true;
+    // Detectar si las features de accesibilidad (p. ej. lector de pantalla)
+    // están activas y, en ese caso, solicitar al servicio de voz que
+    // suprima la reproducción TTS para evitar duplicidad.
+    final semanticsEnabled = SemanticsBinding.instance?.semanticsEnabled ?? false;
+    voice.setSuppressTtsWhenAccessibility(semanticsEnabled);
+
     await voice.startNavigation(
       route: route,
       locationService: location,
@@ -846,6 +852,27 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                                         onPressed: _openGuidanceSettings,
                                         icon: const Icon(
                                           Icons.tune_rounded,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  // Botón debug: reproducir la instrucción actual usando TTS
+                                  Semantics(
+                                    button: true,
+                                    label: 'Reproducir instrucción (debug)',
+                                    child: Material(
+                                      color: const Color(0xCC1A237E),
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: IconButton(
+                                        onPressed: () {
+                                          final instr = _voiceService?.currentInstruction ??
+                                              (_routeSteps.isNotEmpty ? _routeSteps.first.instruction : 'Sin instrucción');
+                                          _voiceService?.speakMessage(instr);
+                                        },
+                                        icon: const Icon(
+                                          Icons.play_arrow_rounded,
                                           color: Colors.white,
                                         ),
                                       ),

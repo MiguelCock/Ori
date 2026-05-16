@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_compass/flutter_compass.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'route_guidance_builder.dart';
@@ -99,6 +101,9 @@ class VoiceGuidanceService extends ChangeNotifier {
   bool _preferencesLoaded = false;
   bool _arrivalHandled = false;
   bool _arrivalHapticTriggered = false;
+  // Si true, cuando haya un lector de pantalla activo solo se usará
+  // el anuncio accesible (TalkBack) y no se reproducirá TTS local.
+  bool _suppressTtsWhenAccessibilityActive = false;
 
   // HU-16: Control de landmarks
   String? _lastAnnouncedLandmark;
@@ -490,6 +495,13 @@ class VoiceGuidanceService extends ChangeNotifier {
       _arrivalHapticTriggered = true;
       await HapticService.trigger(HapticEvent.destinationReached);
     }
+
+    // Intento adicional de fallback háptico: algunos dispositivos/emuladores
+    // pueden no respetar el canal nativo; forzamos un impacto háptico local
+    // como complemento (silencioso si no está disponible).
+    try {
+      HapticFeedback.heavyImpact();
+    } catch (_) {}
 
     await _speakAndAnnounce(
       NavigationMessages.destinationReached(_destinationName),
@@ -1089,7 +1101,15 @@ class VoiceGuidanceService extends ChangeNotifier {
 
   Future<void> _speakAndAnnounce(String text) async {
     try {
+      // Primero anunciar para servicios de accesibilidad (TalkBack/VoiceOver)
       await _announceForTalkBack?.call(text);
+
+      // Comprobar en tiempo real si hay un lector de pantalla activo;
+      // si lo hay, NO reproducimos la TTS de la app para evitar duplicidad.
+      final accessibilityActive = SemanticsBinding.instance?.semanticsEnabled ??
+          _suppressTtsWhenAccessibilityActive;
+      if (accessibilityActive) return;
+
       if (_ttsReady) {
         await _tts.stop();
         await _tts.speak(text);
@@ -1097,6 +1117,12 @@ class VoiceGuidanceService extends ChangeNotifier {
     } catch (e) {
       debugPrint('Error de voz: $e');
     }
+  }
+
+  // Permite al UI indicar si hay un lector de pantalla activo y por tanto
+  // debemos evitar reproducir TTS adicional que provoque duplicidad.
+  void setSuppressTtsWhenAccessibility(bool suppress) {
+    _suppressTtsWhenAccessibilityActive = suppress;
   }
 
   double _bearingDegrees(RoutePoint a, RoutePoint b) {
