@@ -3,6 +3,7 @@ package com.example.campus_guia
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -108,29 +109,43 @@ class MainActivity : FlutterActivity() {
                 val vibratorManager =
                     getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
                 val vibrator = vibratorManager.defaultVibrator
-                if (!vibrator.hasVibrator()) return false
+                // -1 como repeatIndex = no repetir
+                if (!vibrator.hasVibrator()) {
+                    Log.d("Haptic", "vibrate: no vibrator available (S)")
+                    return false
+                }
                 // -1 como repeatIndex = no repetir
                 vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
+                Log.d("Haptic", "vibrate: success (S)")
                 return true
             } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 // Android 8-11: usa Vibrator directamente
                 @Suppress("DEPRECATION")
                 val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
                 @Suppress("DEPRECATION")
-                if (!vibrator.hasVibrator()) return false
+                if (!vibrator.hasVibrator()) {
+                    Log.d("Haptic", "vibrate: no vibrator available (O)")
+                    return false
+                }
                 vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
+                Log.d("Haptic", "vibrate: success (O)")
                 return true
             } else {
                 // Android < 8: API legacy
                 @Suppress("DEPRECATION")
                 val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
                 @Suppress("DEPRECATION")
-                if (!vibrator.hasVibrator()) return false
+                if (!vibrator.hasVibrator()) {
+                    Log.d("Haptic", "vibrate: no vibrator available (legacy)")
+                    return false
+                }
                 @Suppress("DEPRECATION")
                 vibrator.vibrate(pattern, -1)
+                Log.d("Haptic", "vibrate: success (legacy)")
                 return true
             }
         } catch (e: Exception) {
+            Log.e("Haptic", "vibrate exception: ${e.message}")
             // Si el dispositivo no tiene vibrador o falla el canal
             return false
         }

@@ -30,7 +30,9 @@ class HapticService {
         'vibrate',
         {'pattern': pattern},
       );
+      debugPrint('HapticService: native vibrate returned: $success');
       if (success != true) {
+        debugPrint('HapticService: native vibrate failed, using fallback');
         _fallback(event);
       }
     } on PlatformException catch (e) {
