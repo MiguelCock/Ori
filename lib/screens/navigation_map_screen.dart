@@ -12,6 +12,7 @@ import '../services/location_service.dart';
 import '../services/route_guidance_builder.dart';
 import '../services/routing_service.dart';
 import '../services/voice_guidance_service.dart';
+import '../services/haptic_service.dart';
 
 class NavigationMapScreen extends StatefulWidget {
   final String destinationName;
@@ -147,6 +148,63 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
               ],
             );
           },
+        );
+      },
+    );
+  }
+
+  Future<void> _showVibrationTestDialog() async {
+    // Disparar vibración de prueba al abrir el diálogo
+    try {
+      await HapticService.trigger(HapticEvent.destinationReached);
+    } catch (_) {}
+
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: const Color(0xD90D1B2A),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.white24),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: const [
+                    Icon(
+                      Icons.vibration,
+                      size: 64,
+                      color: Colors.white,
+                    ),
+                    SizedBox(height: 12),
+                    Text(
+                      'Probando vibración',
+                      style: TextStyle(color: Colors.white, fontSize: 16),
+                    ),
+                  ],
+                ),
+              ),
+              Positioned(
+                right: 0,
+                top: 0,
+                child: Material(
+                  color: Colors.transparent,
+                  child: IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ),
+              ),
+            ],
+          ),
         );
       },
     );
@@ -852,6 +910,22 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                                         onPressed: _openGuidanceSettings,
                                         icon: const Icon(
                                           Icons.tune_rounded,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Semantics(
+                                    button: true,
+                                    label: 'Probar vibración',
+                                    child: Material(
+                                      color: const Color(0xCC1A237E),
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: IconButton(
+                                        onPressed: _showVibrationTestDialog,
+                                        icon: const Icon(
+                                          Icons.vibration,
                                           color: Colors.white,
                                         ),
                                       ),
