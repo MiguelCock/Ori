@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_compass/flutter_compass.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/semantics.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'route_guidance_builder.dart';
@@ -418,7 +419,13 @@ class VoiceGuidanceService extends ChangeNotifier {
       _currentStepIndex++;
 
       if (_currentStepIndex >= _steps.length) {
-        await _completeArrival();
+        // No anunciar llegada por agotamiento de pasos: solo cuando
+        // realmente estemos dentro del radio del destino.
+        _currentStepIndex = _steps.length - 1;
+        _currentInstruction =
+            'Continúa hasta llegar a $_destinationName. Te avisaré al llegar.';
+        _status = 'Navegación activa hacia $_destinationName';
+        notifyListeners();
         return;
       }
 
@@ -1106,8 +1113,14 @@ class VoiceGuidanceService extends ChangeNotifier {
 
       // Comprobar en tiempo real si hay un lector de pantalla activo;
       // si lo hay, NO reproducimos la TTS de la app para evitar duplicidad.
-      final accessibilityActive = SemanticsBinding.instance?.semanticsEnabled ??
-          _suppressTtsWhenAccessibilityActive;
+      final semanticsOn = SemanticsBinding.instance.semanticsEnabled;
+      final accessibleNavOn = WidgetsBinding
+        .instance
+        .platformDispatcher
+        .accessibilityFeatures
+        .accessibleNavigation;
+      final accessibilityActive =
+        semanticsOn || accessibleNavOn || _suppressTtsWhenAccessibilityActive;
       if (accessibilityActive) return;
 
       if (_ttsReady) {
