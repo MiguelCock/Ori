@@ -14,6 +14,7 @@ import 'haptic_service.dart';
 
 typedef VoiceAnnouncer = Future<void> Function(String message);
 typedef LandmarkResolver = String? Function(double lat, double lng);
+typedef NavigationArrivalHandler = Future<void> Function();
 
 // ── HU-18: Mensajes del sistema centralizados ──
 // Todos los textos fijos que la app lee en voz están aquí.
@@ -80,6 +81,7 @@ class VoiceGuidanceService extends ChangeNotifier {
   RoutingService? _routingService;
   VoiceAnnouncer? _announceForTalkBack;
   LandmarkResolver? _landmarkResolver;
+  NavigationArrivalHandler? _onArrival;
 
   final List<GuidanceStep> _steps = [];
   final List<_RouteLeg> _routeLegs = [];
@@ -102,6 +104,7 @@ class VoiceGuidanceService extends ChangeNotifier {
   bool _preferencesLoaded = false;
   bool _arrivalHandled = false;
   bool _arrivalHapticTriggered = false;
+  Future<void> _voiceQueue = Future<void>.value();
   // Si true, cuando haya un lector de pantalla activo solo se usará
   // el anuncio accesible (TalkBack) y no se reproducirá TTS local.
   bool _suppressTtsWhenAccessibilityActive = false;
@@ -114,12 +117,12 @@ class VoiceGuidanceService extends ChangeNotifier {
   static const Duration _minTimeBetweenLandmarks = Duration(seconds: 15);
   static const double _minMovementMetersForReminderClock = 1.8;
   static const double _minSpeedMpsForReminderClock = 0.35;
-  static const Duration _headingCalibrationWindow = Duration(seconds: 3);
   static const int _minHeadingSamples = 3;
   static const double _minMovementMetersForInitialHeading = 2.5;
   static const Duration _maxWaitForInitialHeading = Duration(seconds: 12);
+  static const double _maxCompassHeadingDeviationDegrees = 30.0;
+  static const double _minCompassConsistencyRatio = 0.75;
   static const double _straightBearingThresholdDegrees = 18.0;
-  static const double _turnBearingThresholdDegrees = 28.0;
   static const double _maxDistanceFromRouteMeters = 25.0;
   static const double _minMovementMetersForHeadingUpdate = 2.5;
   static const double _destinationArrivalRadiusMeters = 12.0;
@@ -134,6 +137,10 @@ class VoiceGuidanceService extends ChangeNotifier {
   String get currentInstruction => _currentInstruction;
   int get remainingSteps => max(0, _steps.length - _currentStepIndex);
   double get minInstructionDistanceMeters => _minInstructionDistanceMeters;
+  List<GuidanceStep> get guidanceSteps => List.unmodifiable(_steps);
+  List<RoutePoint> get activePolyline => List.unmodifiable(_activePolyline);
+  int get currentStepIndex => _currentStepIndex;
+  RouteResult? get activeRoute => _routingService?.currentRoute;
   bool get periodicProgressConfirmationsEnabled =>
       _periodicProgressConfirmationsEnabled;
 
@@ -165,9 +172,12 @@ class VoiceGuidanceService extends ChangeNotifier {
     if (_currentStepIndex == 0 && _initialCalibratedHeadingDegrees != null) {
       return _initialCalibratedHeadingDegrees;
     }
-    if (_committedHeadingDegrees != null) return _committedHeadingDegrees;
-    if (_latestWalkingHeadingDegrees != null)
+    if (_committedHeadingDegrees != null) {
+      return _committedHeadingDegrees;
+    }
+    if (_latestWalkingHeadingDegrees != null) {
       return _latestWalkingHeadingDegrees;
+    }
     if (_routeLegs.isNotEmpty) {
       final idx = _currentStepIndex < _routeLegs.length
           ? _currentStepIndex
@@ -208,14 +218,15 @@ class VoiceGuidanceService extends ChangeNotifier {
   }
 
   Future<void> speakMessage(String message) async {
-    await _initTts();
-    if (!_ttsReady) return;
-    try {
-      await _tts.stop();
-      await _tts.speak(message);
-    } catch (e) {
-      debugPrint('Error al reproducir mensaje TTS: $e');
-    }
+    await _enqueueVoiceTask(() async {
+      await _initTts();
+      if (!_ttsReady) return;
+      try {
+        await _tts.speak(message);
+      } catch (e) {
+        debugPrint('Error al reproducir mensaje TTS: $e');
+      }
+    });
   }
 
   // ── HU-16: Distancia restante para el chip en NavigationMapScreen ──
@@ -265,6 +276,8 @@ class VoiceGuidanceService extends ChangeNotifier {
     required double destinationLng,
     required VoiceAnnouncer announceForTalkBack,
     LandmarkResolver? landmarkResolver,
+    NavigationArrivalHandler? onArrival,
+    bool skipInitialCalibration = false,
   }) async {
     await _ensurePreferencesLoaded();
     await _initTts();
@@ -274,6 +287,7 @@ class VoiceGuidanceService extends ChangeNotifier {
     _routingService = routingService;
     _announceForTalkBack = announceForTalkBack;
     _landmarkResolver = landmarkResolver;
+    _onArrival = onArrival;
     _destinationName = destinationName;
     _destinationLat = destinationLat;
     _destinationLng = destinationLng;
@@ -282,11 +296,11 @@ class VoiceGuidanceService extends ChangeNotifier {
     _lastAnnouncedLandmark = null;
     _lastLandmarkAt = DateTime.fromMillisecondsSinceEpoch(0);
 
-    // Calibrar heading inicial pidiendo al usuario que camine unos pasos y gire.
-    // Esto combina GPS (desplazamiento real) + magnetómetro (rotación) para
-    // obtener una orientación confiable antes de dar la primera instrucción.
-    // Solo se hace al inicio — durante la ruta _updateWalkingHeading se encarga.
-    final double? initialHeadingDegrees = await _calibrateInitialHeading();
+    // Para la navegación automática de prueba usamos el primer tramo de la ruta
+    // como referencia inicial y evitamos la espera de calibración.
+    final double? initialHeadingDegrees = skipInitialCalibration
+      ? (_routeLegs.isNotEmpty ? _routeLegs.first.bearingDegrees : null)
+      : await _calibrateInitialHeading();
     _initialCalibratedHeadingDegrees = initialHeadingDegrees;
 
     _activePolyline = List<RoutePoint>.from(route.polyline);
@@ -340,16 +354,31 @@ class VoiceGuidanceService extends ChangeNotifier {
     await HapticService.trigger(HapticEvent.navigationStarted);
 
     // HU-18: mensaje centralizado
-    await _speakAndAnnounce(
-      '${NavigationMessages.navigationStarted(destinationName)} ${_steps.first.instruction}',
-    );
+    final accessibilityOn =
+        SemanticsBinding.instance.semanticsEnabled ||
+        WidgetsBinding.instance.platformDispatcher.accessibilityFeatures
+            .accessibleNavigation;
+
+    if (accessibilityOn) {
+      await _speakAndAnnounce(
+        '${NavigationMessages.navigationStarted(destinationName)} '
+        'Toca una vez para repetir la instrucción. '
+        'Mantén presionado para cancelar la navegación.',
+      );
+    } else {
+      await _speakAndAnnounce(
+        '${NavigationMessages.navigationStarted(destinationName)} ${_steps.first.instruction}',
+      );
+    }
   }
 
   Future<void> stopNavigation({bool speak = true}) async {
     _locationService?.removeListener(_onLocationChanged);
+    _locationService?.stopSimulation();
     _locationService = null;
     _routingService = null;
     _landmarkResolver = null;
+    _onArrival = null;
 
     _steps.clear();
     _routeLegs.clear();
@@ -503,6 +532,11 @@ class VoiceGuidanceService extends ChangeNotifier {
       await HapticService.trigger(HapticEvent.destinationReached);
     }
 
+    final onArrival = _onArrival;
+    if (onArrival != null) {
+      unawaited(onArrival());
+    }
+
     // Intento adicional de fallback háptico: algunos dispositivos/emuladores
     // pueden no respetar el canal nativo; forzamos un impacto háptico local
     // como complemento (silencioso si no está disponible).
@@ -558,21 +592,6 @@ class VoiceGuidanceService extends ChangeNotifier {
     final tc = t.clamp(0.0, 1.0);
     final cx = ax + abx * tc, cy = ay + aby * tc;
     return sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy));
-  }
-
-  int _nearestStepIndex(double lat, double lng) {
-    if (_steps.isEmpty) return -1;
-    var bestIdx = 0;
-    var bestDistance = double.infinity;
-    for (var i = 0; i < _steps.length; i++) {
-      final p = _steps[i].endPoint;
-      final d = _haversineMeters(lat, lng, p.latitude, p.longitude);
-      if (d < bestDistance) {
-        bestDistance = d;
-        bestIdx = i;
-      }
-    }
-    return bestIdx;
   }
 
   void _syncStepIndexWithProgress(double lat, double lng) {
@@ -697,7 +716,8 @@ class VoiceGuidanceService extends ChangeNotifier {
     if (loc == null) return null;
 
     await _speakAndAnnounce(
-      'Para orientarte, camina en línea recta unos pasos. Obteneré la dirección principalmente por GPS.',
+      'Para orientarte, mantén el teléfono apuntando al frente. '
+      'Si puedes, camina en línea recta unos pasos para mejorar la precisión.',
     );
 
     final startPos = loc.currentLocation;
@@ -715,25 +735,26 @@ class VoiceGuidanceService extends ChangeNotifier {
     }
 
     double? gpsHeading;
+    double movedMeters = 0;
     const checkInterval = Duration(milliseconds: 400);
     var elapsed = Duration.zero;
 
     try {
       while (elapsed < _maxWaitForInitialHeading) {
-        await Future.delayed(checkInterval);
+        await Future<void>.delayed(checkInterval);
         elapsed += checkInterval;
 
         final current = loc.currentLocation;
         if (current == null) continue;
 
-        final moved = _haversineMeters(
+        movedMeters = _haversineMeters(
           startPos.latitude,
           startPos.longitude,
           current.latitude,
           current.longitude,
         );
 
-        if (moved >= _minMovementMetersForInitialHeading) {
+        if (movedMeters >= _minMovementMetersForInitialHeading) {
           gpsHeading = _bearingDegrees(
             RoutePoint(
               latitude: startPos.latitude,
@@ -751,8 +772,15 @@ class VoiceGuidanceService extends ChangeNotifier {
       await compassSub?.cancel();
     }
 
-    // Sin movimiento GPS suficiente → no podemos orientar con confianza.
+    final compassHeading = _stableCompassHeading(compassSamples);
+
+    // Si no hubo movimiento suficiente, usar brújula estable como respaldo.
     if (gpsHeading == null) {
+      if (compassHeading != null) {
+        await _speakAndAnnounce('Orientación lista con brújula.');
+        return compassHeading;
+      }
+
       await _speakAndAnnounce(
         'No se detectó movimiento. '
         'La primera indicación puede no tener dirección precisa.',
@@ -760,28 +788,45 @@ class VoiceGuidanceService extends ChangeNotifier {
       return null;
     }
 
-    // Si el magnetómetro tiene muestras consistentes, combinarlo con el GPS,
-    // pero dejando al GPS como fuente principal del heading inicial.
-    if (compassSamples.length >= _minHeadingSamples) {
-      final compassMean = _circularMeanDegrees(compassSamples);
-      final compassConsistent = compassSamples.every(
-        (s) => _normalizeAngle(s - compassMean).abs() < 30,
-      );
+    if (compassHeading != null) {
+      final delta = _normalizeAngle(compassHeading - gpsHeading).abs();
 
-      if (compassConsistent) {
-        // Promedio circular ponderado
-        final gpsRad = _toRad(gpsHeading);
-        final compassRad = _toRad(compassMean);
-        final sinMean = 0.9 * sin(gpsRad) + 0.1 * sin(compassRad);
-        final cosMean = 0.9 * cos(gpsRad) + 0.1 * cos(compassRad);
-        final combined = (atan2(sinMean, cosMean) * 180 / pi + 360) % 360;
+      // Si GPS movió poco o hay conflicto fuerte, priorizar brújula estable.
+      if (movedMeters < 4.5 || delta >= 70) {
         await _speakAndAnnounce('Orientación lista.');
-        return combined;
+        return compassHeading;
       }
+
+      // Si ambas fuentes son razonablemente coherentes, combinarlas.
+      final gpsRad = _toRad(gpsHeading);
+      final compassRad = _toRad(compassHeading);
+      final sinMean = 0.8 * sin(gpsRad) + 0.2 * sin(compassRad);
+      final cosMean = 0.8 * cos(gpsRad) + 0.2 * cos(compassRad);
+      final combined = (atan2(sinMean, cosMean) * 180 / pi + 360) % 360;
+      await _speakAndAnnounce('Orientación lista.');
+      return combined;
     }
 
     await _speakAndAnnounce('Orientación lista.');
     return gpsHeading;
+  }
+
+  double? _stableCompassHeading(List<double> samples) {
+    if (samples.length < _minHeadingSamples) return null;
+
+    final mean = _circularMeanDegrees(samples);
+    var consistentCount = 0;
+
+    for (final sample in samples) {
+      final deviation = _normalizeAngle(sample - mean).abs();
+      if (deviation <= _maxCompassHeadingDeviationDegrees) {
+        consistentCount++;
+      }
+    }
+
+    final consistency = consistentCount / samples.length;
+    if (consistency < _minCompassConsistencyRatio) return null;
+    return mean;
   }
 
   double _circularMeanDegrees(List<double> samples) {
@@ -951,191 +996,50 @@ class VoiceGuidanceService extends ChangeNotifier {
     return legs;
   }
 
-  List<GuidanceStep> _buildStepsFromLegs(
-    List<_RouteLeg> legs, {
-    double? initialHeadingDegrees,
-  }) {
-    if (legs.isEmpty) return [];
-
-    final steps = <GuidanceStep>[];
-    String? lastReference;
-
-    for (int i = 0; i < legs.length; i++) {
-      final leg = legs[i];
-      final reference = _landmarkResolver?.call(
-        leg.endPoint.latitude,
-        leg.endPoint.longitude,
-      );
-
-      final includeReference = reference != null && reference != lastReference;
-      if (reference != null) {
-        lastReference = reference;
-      }
-
-      final instruction = _legInstruction(
-        leg: leg,
-        previousLeg: i > 0 ? legs[i - 1] : null,
-        isFinalLeg: i == legs.length - 1,
-        initialHeadingDegrees: initialHeadingDegrees,
-        includeReference: includeReference,
-        reference: reference,
-      );
-
-      final trigger = max(
-        i == legs.length - 1 ? 5.0 : _minInstructionDistanceMeters,
-        min(20.0, leg.distanceMeters * 0.35),
-      );
-
-      steps.add(
-        GuidanceStep(
-          endPoint: leg.endPoint,
-          instruction: instruction,
-          triggerDistanceMeters: trigger,
-        ),
-      );
-    }
-
-    return steps;
-  }
-
-  String _legInstruction({
-    required _RouteLeg leg,
-    required _RouteLeg? previousLeg,
-    required bool isFinalLeg,
-    required double? initialHeadingDegrees,
-    required bool includeReference,
-    required String? reference,
-  }) {
-    final movementText = 'avanza ${leg.distanceMeters.round()} metros';
-
-    String baseInstruction;
-
-    if (previousLeg == null) {
-      baseInstruction = _initialOrientationInstruction(
-        from: leg.startPoint,
-        to: leg.endPoint,
-        distanceMeters: leg.distanceMeters,
-        deviceHeadingDegrees: initialHeadingDegrees,
-      );
-    } else {
-      final delta = _normalizeAngle(
-        leg.bearingDegrees - previousLeg.bearingDegrees,
-      );
-      if (delta.abs() >= _turnBearingThresholdDegrees) {
-        baseInstruction = 'GIRA ${_turnWord(delta)} y $movementText.';
-      } else {
-        baseInstruction =
-            'Continúa recto ${leg.distanceMeters.round()} metros.';
-      }
-    }
-
-    if (isFinalLeg) {
-      final arrival = _arrivalInstruction(leg);
-      if (includeReference && reference != null) {
-        return '$baseInstruction $arrival. Pasarás junto a $reference.';
-      }
-      return '$baseInstruction $arrival.';
-    }
-
-    if (includeReference && reference != null) {
-      return '$baseInstruction Pasarás junto a $reference.';
-    }
-
-    return baseInstruction;
-  }
-
-  String _initialOrientationInstruction({
-    required RoutePoint from,
-    required RoutePoint to,
-    required double distanceMeters,
-    required double? deviceHeadingDegrees,
-  }) {
-    if (deviceHeadingDegrees == null || deviceHeadingDegrees.isNaN) {
-      return 'Avanza ${distanceMeters.round()} metros.';
-    }
-
-    final targetBearing = _bearingDegrees(from, to);
-    final delta = _normalizeAngle(targetBearing - deviceHeadingDegrees);
-
-    if (delta.abs() <= 30) {
-      return 'Avanza hacia adelante ${distanceMeters.round()} metros.';
-    }
-    if (delta.abs() >= 150) {
-      return 'Da media vuelta y avanza ${distanceMeters.round()} metros.';
-    }
-
-    return delta > 0
-        ? 'GIRA a la derecha y avanza ${distanceMeters.round()} metros.'
-        : 'GIRA a la izquierda y avanza ${distanceMeters.round()} metros.';
-  }
-
-  String _turnWord(double delta) {
-    return delta > 0 ? 'a la derecha' : 'a la izquierda';
-  }
-
-  String _arrivalInstruction(_RouteLeg leg) {
-    final destinationPoint = RoutePoint(
-      latitude: _destinationLat,
-      longitude: _destinationLng,
-    );
-    final destBearing = _bearingDegrees(leg.endPoint, destinationPoint);
-    final referenceHeading = _latestWalkingHeadingDegrees ?? leg.bearingDegrees;
-    final delta = _normalizeAngle(destBearing - referenceHeading);
-    final destinationText = _normalizeText(_destinationName);
-
-    if (delta.abs() <= 30) {
-      return 'Llegaste a tu destino. $destinationText al frente';
-    }
-    if (delta.abs() >= 150) {
-      return 'Llegaste a tu destino. $destinationText detrás de ti';
-    }
-
-    return delta > 0
-        ? 'Llegaste a tu destino. $destinationText a tu derecha'
-        : 'Llegaste a tu destino. $destinationText a tu izquierda';
-  }
-
-  String _normalizeText(String text) {
-    return text
-        .replaceAll('Ã¡', 'á')
-        .replaceAll('Ã©', 'é')
-        .replaceAll('Ã­', 'í')
-        .replaceAll('Ã³', 'ó')
-        .replaceAll('Ãº', 'ú')
-        .replaceAll('Ã±', 'ñ')
-        .replaceAll('Â', '');
-  }
-
   Future<void> _speakAndAnnounce(String text) async {
-    try {
-      // Primero anunciar para servicios de accesibilidad (TalkBack/VoiceOver)
-      await _announceForTalkBack?.call(text);
+    await _enqueueVoiceTask(() async {
+      try {
+        // Primero anunciar para servicios de accesibilidad (TalkBack/VoiceOver)
+        await _announceForTalkBack?.call(text);
 
-      // Comprobar en tiempo real si hay un lector de pantalla activo;
-      // si lo hay, NO reproducimos la TTS de la app para evitar duplicidad.
-      final semanticsOn = SemanticsBinding.instance.semanticsEnabled;
-      final accessibleNavOn = WidgetsBinding
-        .instance
-        .platformDispatcher
-        .accessibilityFeatures
-        .accessibleNavigation;
-      final accessibilityActive =
-        semanticsOn || accessibleNavOn || _suppressTtsWhenAccessibilityActive;
-      if (accessibilityActive) return;
+        // Comprobar en tiempo real si hay un lector de pantalla activo;
+        // si lo hay, NO reproducimos la TTS de la app para evitar duplicidad.
+        final semanticsOn = SemanticsBinding.instance.semanticsEnabled;
+        final accessibleNavOn = WidgetsBinding
+          .instance
+          .platformDispatcher
+          .accessibilityFeatures
+          .accessibleNavigation;
+        final accessibilityActive =
+          semanticsOn || accessibleNavOn || _suppressTtsWhenAccessibilityActive;
+        if (accessibilityActive) return;
 
-      if (_ttsReady) {
-        await _tts.stop();
-        await _tts.speak(text);
+        if (_ttsReady) {
+          await _tts.speak(text);
+        }
+      } catch (e) {
+        debugPrint('Error de voz: $e');
       }
-    } catch (e) {
-      debugPrint('Error de voz: $e');
-    }
+    });
+  }
+
+  Future<void> _enqueueVoiceTask(Future<void> Function() task) {
+    _voiceQueue = _voiceQueue
+        .then((_) => task())
+        .catchError((_) {})
+        .then((_) {});
+    return _voiceQueue;
   }
 
   // Permite al UI indicar si hay un lector de pantalla activo y por tanto
   // debemos evitar reproducir TTS adicional que provoque duplicidad.
   void setSuppressTtsWhenAccessibility(bool suppress) {
     _suppressTtsWhenAccessibilityActive = suppress;
+  }
+
+  Future<void> completeNavigationIfActive() async {
+    if (!_isNavigating || _arrivalHandled) return;
+    await _completeArrival();
   }
 
   double _bearingDegrees(RoutePoint a, RoutePoint b) {
@@ -1150,8 +1054,12 @@ class VoiceGuidanceService extends ChangeNotifier {
 
   double _normalizeAngle(double angle) {
     double a = angle;
-    while (a > 180) a -= 360;
-    while (a < -180) a += 360;
+    while (a > 180) {
+      a -= 360;
+    }
+    while (a < -180) {
+      a += 360;
+    }
     return a;
   }
 

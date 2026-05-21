@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+// Haptic moved to main screen; keep HomeScreen minimal
 import 'permission_screen.dart';
 import 'main_screen.dart';
 
@@ -14,7 +16,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final FocusNode _mainButtonFocusNode = FocusNode();
-  bool _checking = true; 
+  bool _checking = true;
 
   static const _prefKey = 'permissions_accepted';
 
@@ -29,8 +31,18 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _checkIfAlreadyAccepted();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _runStartupFlow();
+    });
   }
+
+  Future<void> _runStartupFlow() async {
+    if (!mounted) return;
+    if (!mounted) return;
+    await _checkIfAlreadyAccepted();
+  }
+
+  // Startup vibration test removed — moved to main screen as a single manual control.
 
   /// Si ya aceptó permisos antes, va directo a MainScreen
   Future<void> _checkIfAlreadyAccepted() async {
@@ -110,6 +122,8 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+
+  // Vibrate handler removed from HomeScreen — centralised on MainScreen.
 
   @override
   Widget build(BuildContext context) {
