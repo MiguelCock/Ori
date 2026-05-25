@@ -64,6 +64,7 @@ class LocationService extends ChangeNotifier {
   LocationStatus _status = LocationStatus.initializing;
   LocationData? _currentLocation;
   String _lastError = '';
+  bool _simulationMode = false;
 
   Stream<Position>? _positionStream;
 
@@ -71,12 +72,14 @@ class LocationService extends ChangeNotifier {
   LocationStatus get status => _status;
   LocationData? get currentLocation => _currentLocation;
   String get lastError => _lastError;
+  bool get isSimulationMode => _simulationMode;
   bool get hasValidLocation =>
       _currentLocation != null && _currentLocation!.isValidForNavigation;
 
   // Inicializar y comenzar a escuchar ubicación
   Future<void> initialize() async {
     try {
+      if (_simulationMode) return;
       // Verificar si el GPS está habilitado
       bool isLocationEnabled = await Geolocator.isLocationServiceEnabled();
       if (!isLocationEnabled) {
@@ -117,6 +120,7 @@ class LocationService extends ChangeNotifier {
 
   // Iniciar escucha en tiempo real
   Future<void> _startListening() async {
+    if (_simulationMode) return;
     // En Android usamos AndroidSettings para forzar explícitamente el uso del
     // FusedLocationProvider de Google Play Services, que combina GPS + WiFi +
     // Cell towers con filtro Kalman interno — más preciso que el GPS puro.
@@ -157,6 +161,7 @@ class LocationService extends ChangeNotifier {
 
   // Manejar actualización de posición
   void _handlePositionUpdate(Position position) {
+    if (_simulationMode) return;
     // Filtro de calidad: si ya tenemos una posición buena (< 15m) y llega una
     // muy mala (> 50m), la descartamos para evitar saltos bruscos en la ruta.
     // Umbral subido de 30m a 50m para no congelar la posición en campus
@@ -206,6 +211,7 @@ class LocationService extends ChangeNotifier {
 
   // Manejar errores del stream
   void _handleError(error) {
+    if (_simulationMode) return;
     _lastError = 'Error en GPS: $error';
     _updateStatus(LocationStatus.noSignal);
     _announce('Se perdió la señal GPS. Busca un área abierta.');
@@ -218,6 +224,29 @@ class LocationService extends ChangeNotifier {
       _status = newStatus;
       notifyListeners();
     }
+  }
+
+  void startSimulation() {
+    _simulationMode = true;
+    _updateStatus(LocationStatus.active);
+  }
+
+  void stopSimulation() {
+    _simulationMode = false;
+    notifyListeners();
+  }
+
+  void seedLocation(LocationData location) {
+    _currentLocation = location;
+    _status = location.isValidForNavigation
+        ? LocationStatus.active
+        : LocationStatus.lowAccuracy;
+    notifyListeners();
+  }
+
+  void setSimulatedLocation(LocationData location) {
+    _simulationMode = true;
+    seedLocation(location);
   }
 
   // Anuncio accesible

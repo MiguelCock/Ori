@@ -26,9 +26,18 @@ class HapticService {
     final List<int> pattern = _patternFor(event);
 
     try {
-      await _channel.invokeMethod('vibrate', {'pattern': pattern});
+      final success = await _channel.invokeMethod<bool>(
+        'vibrate',
+        {'pattern': pattern},
+      );
+      debugPrint('HapticService: native vibrate returned: $success');
+      if (success != true) {
+        debugPrint('HapticService: native vibrate failed, using fallback');
+        _fallback(event);
+      }
     } on PlatformException catch (e) {
       debugPrint('HapticService error: ${e.message}');
+      _fallback(event);
     } catch (e) {
       // Fallback silencioso: si el canal no existe todavía,
       // usamos HapticFeedback estándar de Flutter.

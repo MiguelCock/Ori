@@ -13,6 +13,7 @@ import '../services/route_guidance_builder.dart';
 import '../services/routing_service.dart';
 import '../services/voice_guidance_service.dart';
 import '../utils/accessibility_scale.dart';
+import '../services/haptic_service.dart';
 
 class NavigationMapScreen extends StatefulWidget {
   final String destinationName;
@@ -23,6 +24,7 @@ class NavigationMapScreen extends StatefulWidget {
   final String? highlightCategoryId;
   final RouteResult? initialRoute;
   final List<List<double>>? destinationPolygon;
+  final bool autoStartSimulation;
 
   const NavigationMapScreen({
     super.key,
@@ -34,6 +36,7 @@ class NavigationMapScreen extends StatefulWidget {
     this.highlightCategoryId,
     this.initialRoute,
     this.destinationPolygon,
+    this.autoStartSimulation = false,
   });
 
   @override
@@ -54,6 +57,9 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
   bool _isNavigationPaused = false;
   bool _isResumingNavigation = false;
   String? _navigationLiveMessage;
+  bool _usageInstructionsShown = false;
+  bool _routeSimulationRunning = false;
+  bool _autoSimulationScheduled = false;
 
   late LatLng _destination;
   late LatLng _currentUser;
@@ -63,7 +69,7 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
   double _currentZoom = 17;
 
   List<LatLng> _routePoints = [];
-  List<_RouteStep> _routeSteps = [];
+  List<GuidanceStep> _routeSteps = [];
   double? _routeDistanceMeters;
   // HU-16: distancia restante calculada desde VoiceGuidanceService
   double? _remainingDistanceMeters;
@@ -94,66 +100,27 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     await _voiceService?.speakMessage(message);
   }
 
-  Future<void> _openGuidanceSettings() async {
+  void _syncVoiceGuidanceState() {
     final voice = _voiceService;
-    if (voice == null) return;
+    if (voice == null || !mounted) return;
 
-    var periodicEnabled = voice.periodicProgressConfirmationsEnabled;
+    setState(() {
+      _activeRoute = voice.activeRoute;
+      _routePoints = voice.activePolyline
+          .map((point) => LatLng(point.latitude, point.longitude))
+          .toList();
+      _routeSteps = List<GuidanceStep>.from(voice.guidanceSteps);
 
-    await showDialog<void>(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              backgroundColor: const Color(0xFF12263A),
-              title: const Text(
-                'Configuración de guía',
-                style: TextStyle(color: Colors.white),
-              ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  SwitchListTile(
-                    value: periodicEnabled,
-                    onChanged: (enabled) async {
-                      setDialogState(() => periodicEnabled = enabled);
-                      await voice.setPeriodicProgressConfirmationsEnabled(
-                        enabled,
-                      );
-                      if (!mounted) return;
-                      final message = enabled
-                          ? 'Confirmaciones periódicas de progreso activadas.'
-                          : 'Confirmaciones periódicas de progreso desactivadas.';
-                      await _announceAndSpeak(message);
-                    },
-                    title: const Text(
-                      'Confirmaciones periódicas',
-                      style: TextStyle(color: Colors.white),
-                    ),
-                    subtitle: const Text(
-                      'Recibe mensajes automáticos de avance durante la ruta.',
-                      style: TextStyle(color: Colors.white70),
-                    ),
-                    activeColor: const Color(0xFF82B1FF),
-                    contentPadding: EdgeInsets.zero,
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text(
-                    'Cerrar',
-                    style: TextStyle(color: Color(0xFF82B1FF)),
-                  ),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
+      final routeDistance = voice.activeRoute?.totalDistanceMeters;
+      if (routeDistance != null) {
+        _routeDistanceMeters = routeDistance;
+      }
+
+      if (voice.isNavigating) {
+        _hasError = false;
+        _isLoading = false;
+      }
+    });
   }
 
   Color _areaFillColor({required bool highlighted}) {
@@ -231,30 +198,9 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     return minDist;
   }
 
-  int _nextStepIndex(LatLng current) {
-    if (_routeSteps.isEmpty) return 0;
-
-    for (var i = 0; i < _routeSteps.length; i++) {
-      final d = _distanceMeters(
-        current.latitude,
-        current.longitude,
-        _routeSteps[i].location.latitude,
-        _routeSteps[i].location.longitude,
-      );
-      if (d > 10) return i;
-    }
-
-    return _routeSteps.length - 1;
-  }
-
   String _formatDistance(double meters) {
     if (meters >= 1000) return '${(meters / 1000).toStringAsFixed(1)} km';
     return '${meters.round()} m';
-  }
-
-  String _formatAccuracy(double? accuracyMeters) {
-    if (accuracyMeters == null || !accuracyMeters.isFinite) return '--';
-    return '±${accuracyMeters.round()} m';
   }
 
   String _normalizeText(String text) {
@@ -288,9 +234,10 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     if (geo == null) return false;
 
     final place = geo.getPlaceContaining(origin.latitude, origin.longitude);
-    final polygon = place?.polygon;
+    if (place == null) return false;
+
+    final polygon = place.polygon;
     final mustWait =
-        place != null &&
         polygon != null &&
         polygon.length >= 3 &&
         _isInsidePolygon(origin.latitude, origin.longitude, polygon);
@@ -306,10 +253,11 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
       return false;
     }
 
+    final placeName = place.name;
     final firstTime = _waitingExitPolygon == null;
     if (mounted) {
       setState(() {
-        _waitingExitPlaceName = place!.name;
+        _waitingExitPlaceName = placeName;
         _waitingExitPolygon = polygon;
         _waitingExitOutsideSamples = 0;
         _isLoading = false;
@@ -319,7 +267,7 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
 
     if (firstTime) {
       await _announceAndSpeak(
-        'Estás dentro de ${_normalizeText(place!.name)}. Sal para iniciar la navegación.',
+        'Estás dentro de ${_normalizeText(placeName)}. Sal para iniciar la navegación.',
       );
     }
 
@@ -332,26 +280,12 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
         .map((p) => LatLng(p.latitude, p.longitude))
         .toList();
 
-    final guidanceSteps = RouteGuidanceBuilder.buildSteps(
-      polyline: route.polyline,
-      destinationLat: widget.destLat,
-      destinationLng: widget.destLng,
-      destinationName: widget.destinationName,
-      landmarkResolver: (lat, lng) =>
-          _geoService?.getNearestBlockReference(lat, lng),
-      initialHeadingDegrees: _voiceService?.mapReferenceHeadingDegrees,
-    );
-
     setState(() {
       _routePoints = points;
-      _routeSteps = guidanceSteps
-          .map(
-            (step) => _RouteStep(
-              instruction: step.instruction,
-              location: LatLng(step.endPoint.latitude, step.endPoint.longitude),
-            ),
-          )
-          .toList();
+      final voiceService = _voiceService;
+      final voiceSteps =
+          voiceService == null ? const <GuidanceStep>[] : voiceService.guidanceSteps;
+      _routeSteps = List<GuidanceStep>.from(voiceSteps);
       _routeDistanceMeters = route.totalDistanceMeters;
       _hasError = points.length < 2;
       _isLoading = false;
@@ -371,17 +305,228 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     }
 
     _voiceStarted = true;
-    await voice.startNavigation(
-      route: route,
-      locationService: location,
-      routingService: routing,
-      destinationName: widget.destinationName,
-      destinationLat: widget.destLat,
-      destinationLng: widget.destLng,
-      announceForTalkBack: _announce,
-      landmarkResolver: (lat, lng) =>
-          _geoService?.getNearestBlockReference(lat, lng),
+    // Detectar si las features de accesibilidad (p. ej. lector de pantalla)
+    // están activas y, en ese caso, solicitar al servicio de voz que
+    // suprima la reproducción TTS para evitar duplicidad.
+    final semanticsBinding = SemanticsBinding.instance;
+    final semanticsEnabled = semanticsBinding.semanticsEnabled;
+    voice.setSuppressTtsWhenAccessibility(semanticsEnabled);
+
+    if (!voice.isNavigating) {
+      final geoService = _geoService;
+      await voice.startNavigation(
+        route: route,
+        locationService: location,
+        routingService: routing,
+        destinationName: widget.destinationName,
+        destinationLat: widget.destLat,
+        destinationLng: widget.destLng,
+        announceForTalkBack: _announce,
+        landmarkResolver: (lat, lng) => geoService == null
+            ? null
+            : geoService.getNearestBlockReference(lat, lng),
+        onArrival: _showArrivalOverlay,
+        skipInitialCalibration: widget.autoStartSimulation,
+      );
+    } else {
+      _syncVoiceGuidanceState();
+    }
+
+    if (widget.autoStartSimulation && !_autoSimulationScheduled) {
+      _autoSimulationScheduled = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _runRouteSimulation();
+        }
+      });
+      return;
+    }
+
+    await _showUsageInstructionsIfNeeded();
+  }
+
+  String _usageInstructionsText() {
+    return 'Navegación iniciada. Toca una vez la pantalla para repetir tu ubicación e indicaciones. '
+        'Mantén presionada la pantalla para finalizar la navegación.';
+  }
+
+  Future<void> _showUsageInstructionsIfNeeded() async {
+    if (_usageInstructionsShown || !mounted) return;
+    _usageInstructionsShown = true;
+
+    final accessibilityOn =
+        SemanticsBinding.instance.semanticsEnabled ||
+        WidgetsBinding.instance.platformDispatcher.accessibilityFeatures
+            .accessibleNavigation;
+
+    if (accessibilityOn) {
+      return;
+    }
+
+    final message = _usageInstructionsText();
+    await _voiceService?.speak(message);
+    if (!mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF12263A),
+          title: const Text(
+            'Instrucciones de uso',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: Text(
+            message,
+            style: const TextStyle(color: Colors.white70, height: 1.4),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text(
+                'Entendido',
+                style: TextStyle(color: Color(0xFF82B1FF)),
+              ),
+            ),
+          ],
+        );
+      },
     );
+  }
+
+  Future<void> _repeatCurrentGuidanceFromGesture() async {
+    final voice = _voiceService;
+    if (voice == null || !voice.isNavigating) return;
+
+    final location = _locationService?.currentLocation;
+    final lat = location?.latitude ?? _currentUser.latitude;
+    final lng = location?.longitude ?? _currentUser.longitude;
+
+    final placeName = _geoService?.getPlaceContaining(lat, lng)?.name;
+    final nearbyRef = _geoService?.getNearestBlockReference(lat, lng);
+
+    final locationText = placeName != null
+        ? 'Ubicación actual: ${_normalizeText(placeName)}.'
+        : (nearbyRef != null
+              ? 'Ubicación actual: cerca de ${_normalizeText(nearbyRef)}.'
+              : 'Ubicación actual registrada.');
+
+    final instruction = voice.currentInstruction.isNotEmpty
+        ? voice.currentInstruction
+      : (_routeSteps.isNotEmpty
+          ? _routeSteps.first.instruction
+              : 'Sin indicaciones disponibles por ahora.');
+
+    final remaining = _remainingDistanceMeters ?? voice.getRemainingDistance(lat, lng);
+    final remainingText = (remaining > 0)
+        ? ' Distancia restante ${_formatDistance(remaining)}.'
+        : '';
+
+    await HapticFeedback.selectionClick();
+    await voice.speak('$locationText $instruction$remainingText');
+  }
+
+  Future<void> _showArrivalOverlay() async {
+    try {
+      await HapticService.trigger(HapticEvent.destinationReached);
+    } catch (_) {}
+
+    await Future<void>.delayed(const Duration(milliseconds: 900));
+    if (!mounted) return;
+    Navigator.of(context).maybePop();
+  }
+
+  Future<void> _stopRouteSimulation() async {
+    final location = _locationService;
+    location?.stopSimulation();
+    if (!mounted) return;
+    setState(() {
+      _routeSimulationRunning = false;
+    });
+    await _announce('Simulación detenida.');
+  }
+
+  Future<void> _runRouteSimulation() async {
+    if (_routeSimulationRunning) return;
+
+    final voice = _voiceService;
+    final location = _locationService;
+    if (voice == null || location == null) return;
+
+    final simulationPath = _routePoints.isNotEmpty
+      ? List<LatLng>.from(_routePoints)
+      : _routeSteps
+          .map((step) => LatLng(step.endPoint.latitude, step.endPoint.longitude))
+          .toList();
+
+    if (simulationPath.length < 2) {
+      await _announce('No hay una ruta suficiente para simular.');
+      return;
+    }
+
+    if (!voice.isNavigating) {
+      await _announce('Primero inicia una navegación para simularla.');
+      return;
+    }
+
+    setState(() {
+      _routeSimulationRunning = true;
+    });
+
+    location.startSimulation();
+
+    try {
+      await _announceAndSpeak('Simulación de navegación iniciada.');
+
+      final firstPoint = simulationPath.first;
+      location.seedLocation(
+        LocationData(
+          latitude: firstPoint.latitude,
+          longitude: firstPoint.longitude,
+          accuracy: 5,
+          speed: 0,
+          heading: null,
+          timestamp: DateTime.now(),
+        ),
+      );
+
+      for (var i = 1; i < simulationPath.length && mounted; i++) {
+        if (!_routeSimulationRunning) break;
+
+        final currentPoint = simulationPath[i];
+        location.setSimulatedLocation(
+          LocationData(
+            latitude: currentPoint.latitude,
+            longitude: currentPoint.longitude,
+            accuracy: 5,
+            speed: i == simulationPath.length - 1 ? 0.6 : 1.2,
+            heading: null,
+            timestamp: DateTime.now(),
+          ),
+        );
+
+        await Future<void>.delayed(const Duration(milliseconds: 3600));
+      }
+
+      await voice.completeNavigationIfActive();
+    } finally {
+      location.stopSimulation();
+      if (mounted) {
+        setState(() {
+          _routeSimulationRunning = false;
+        });
+      } else {
+        _routeSimulationRunning = false;
+      }
+    }
+  }
+
+  Future<void> _finishNavigationFromLongPress() async {
+    if (_routeSimulationRunning) {
+      await _stopRouteSimulation();
+    }
+    await _cancelNavigation();
   }
 
   Future<void> _loadLocalRoute({required LatLng origin}) async {
@@ -512,6 +657,10 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
           ? remaining
           : _routeDistanceMeters;
     });
+
+    if (voice?.isNavigating == true) {
+      return;
+    }
 
     final waitingPolygon = _waitingExitPolygon;
     if (waitingPolygon != null && waitingPolygon.length >= 3) {
@@ -653,6 +802,13 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     _currentZoom = 17;
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (_usesLocalRouting && widget.autoStartSimulation) {
+        _announce('Mostrando ruta local a ${widget.destinationName}.');
+        _applyLocalRoute(widget.initialRoute!);
+        await _startVoiceGuidanceIfNeeded();
+        return;
+      }
+
       final mustWaitForExit = await _waitForExitIfInsideArea(_currentUser);
       if (mustWaitForExit) return;
 
@@ -691,7 +847,9 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
 
     final nextVoice = Provider.of<VoiceGuidanceService>(context, listen: false);
     if (!identical(_voiceService, nextVoice)) {
+      _voiceService?.removeListener(_syncVoiceGuidanceState);
       _voiceService = nextVoice;
+      _voiceService?.addListener(_syncVoiceGuidanceState);
     }
 
     final here = _locationService?.currentLocation;
@@ -704,6 +862,7 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
   @override
   void dispose() {
     _locationService?.removeListener(_onLocationChanged);
+    _voiceService?.removeListener(_syncVoiceGuidanceState);
     super.dispose();
   }
 
@@ -933,11 +1092,12 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     final geo = Provider.of<GeoJsonService>(context, listen: false);
     final polygons = _buildCampusPolygons(geo);
     final polygonLabels = _buildPolygonLabels(geo);
-    final selectedLabel = widget.highlightCategoryId == null
-        ? null
-        : geo.categoryById(widget.highlightCategoryId!)?.label;
-    final nextIndex = _nextStepIndex(_currentUser);
-    final nextSteps = _routeSteps.skip(nextIndex).take(3).toList();
+    final voice = _voiceService;
+    final currentInstruction = voice != null && voice.currentInstruction.isNotEmpty
+      ? voice.currentInstruction
+      : (_routeSteps.isNotEmpty
+        ? _routeSteps.first.instruction
+        : 'Sin indicaciones disponibles todavía.');
     final waitingExitText = _waitingExitPlaceName == null
         ? 'Estás dentro de un área. Sal para iniciar la navegación.'
         : 'Estás dentro de ${_normalizeText(_waitingExitPlaceName!)}. Sal para iniciar la navegación.';
@@ -996,11 +1156,22 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
       },
       child: Scaffold(
         backgroundColor: const Color(0xFF0D1B2A),
-        body: LayoutBuilder(
-          builder: (context, constraints) {
-            final mapHeight =
-                constraints.maxHeight * (textScale > 1.3 ? 0.28 : 1 / 3);
-            final topHeight = constraints.maxHeight - mapHeight;
+        body: Semantics(
+          container: true,
+          label: 'Pantalla de navegación activa',
+          hint: 'Toca dos veces para repetir la instrucción actual. Mantén presionado para cancelar la navegación.',
+          onTapHint: 'Repetir instrucción',
+          onLongPressHint: 'Cancelar navegación',
+          onTap: _repeatCurrentGuidanceFromGesture,
+          onLongPress: _finishNavigationFromLongPress,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _repeatCurrentGuidanceFromGesture,
+            onLongPress: _finishNavigationFromLongPress,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final mapHeight = constraints.maxHeight * (textScale > 1.3 ? 0.28 : 1 / 3);
+                final topHeight = constraints.maxHeight - mapHeight;
 
             return Stack(
               children: [
@@ -1117,8 +1288,7 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                                     ),
                                   ),
                                 ),
-                              ],
-
+                              ),
                               const SizedBox(height: 10),
 
                               // Panel principal de métricas e indicaciones
@@ -1342,52 +1512,53 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                             topLeft: Radius.circular(18),
                             topRight: Radius.circular(18),
                           ),
-                          child: FlutterMap(
-                            mapController: _mapController,
-                            options: MapOptions(
-                              initialCenter: _currentUser,
-                              initialZoom: _currentZoom,
-                              minZoom: minZoom,
-                              maxZoom: maxZoom,
-                              interactionOptions: const InteractionOptions(
-                                flags:
-                                    InteractiveFlag.drag |
-                                    InteractiveFlag.pinchZoom |
-                                    InteractiveFlag.doubleTapZoom |
-                                    InteractiveFlag.scrollWheelZoom,
+                          child: ExcludeSemantics(
+                            child: FlutterMap(
+                              mapController: _mapController,
+                              options: MapOptions(
+                                initialCenter: _currentUser,
+                                initialZoom: _currentZoom,
+                                minZoom: minZoom,
+                                maxZoom: maxZoom,
+                                interactionOptions: const InteractionOptions(
+                                  flags:
+                                      InteractiveFlag.drag |
+                                      InteractiveFlag.pinchZoom |
+                                      InteractiveFlag.doubleTapZoom |
+                                      InteractiveFlag.scrollWheelZoom,
+                                ),
+                                onPositionChanged: (camera, hasGesture) {
+                                  _currentZoom = camera.zoom;
+                                },
                               ),
-                              onPositionChanged: (camera, hasGesture) {
-                                _currentZoom = camera.zoom;
-                              },
-                            ),
-                            children: [
-                              TileLayer(
-                                urlTemplate:
-                                    'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                                userAgentPackageName: 'campus_guia',
-                              ),
-                              if (polygons.isNotEmpty)
-                                PolygonLayer(polygons: polygons),
-                              if (_routePoints.length >= 2)
-                                PolylineLayer(
-                                  polylines: [
-                                    Polyline(
-                                      points: _routePoints,
-                                      strokeWidth: 5,
-                                      color: const Color(0xFF1976D2),
-                                    ),
+                              children: [
+                                TileLayer(
+                                  urlTemplate:
+                                      'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                  userAgentPackageName: 'campus_guia',
+                                ),
+                                if (polygons.isNotEmpty)
+                                  PolygonLayer(polygons: polygons),
+                                if (_routePoints.length >= 2)
+                                  PolylineLayer(
+                                    polylines: [
+                                      Polyline(
+                                        points: _routePoints,
+                                        strokeWidth: 5,
+                                        color: const Color(0xFF1976D2),
+                                      ),
+                                    ],
+                                  ),
+                                MarkerLayer(
+                                  markers: [
+                                    ...polygonLabels,
+                                    ...routeNodeMarkers,
+                                    userMarker,
                                   ],
                                 ),
-                              MarkerLayer(
-                                markers: [
-                                  ...polygonLabels,
-                                  ...routeNodeMarkers,
-                                  userMarker,
-                                ],
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
-                        ),
                       ),
                     ),
                   ],
@@ -1418,65 +1589,12 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                   ),
               ],
             );
-          },
+              },
+            ),
+          ),
         ),
       ),
     );
   }
 }
 
-class _MetricChip extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-
-  const _MetricChip({
-    required this.icon,
-    required this.label,
-    required this.value,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white24),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, color: const Color(0xFF82B1FF), size: 18),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: const TextStyle(color: Colors.white54, fontSize: 11),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  value,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _RouteStep {
-  final String instruction;
-  final LatLng location;
-
-  const _RouteStep({required this.instruction, required this.location});
-}

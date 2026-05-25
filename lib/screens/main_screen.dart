@@ -118,6 +118,120 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
+  CampusPlace? _pickTestDestination(
+    GeoJsonService geo,
+    LocationService loc,
+  ) {
+    final current = loc.currentLocation;
+    if (current == null) return null;
+
+    final currentPlace = geo.getPlaceContaining(
+      current.latitude,
+      current.longitude,
+    );
+    final nearby = geo.getNearby(current.latitude, current.longitude, limit: 10);
+
+    for (final place in nearby) {
+      final samePlace = currentPlace != null &&
+          place.name == currentPlace.name &&
+          place.description == currentPlace.description;
+      final tooClose = place.distanceFrom(current.latitude, current.longitude) < 20;
+      if (!samePlace && !tooClose) {
+        return place;
+      }
+    }
+
+    return nearby.isNotEmpty ? nearby.first : null;
+  }
+
+  Future<void> _startRouteTest() async {
+    HapticFeedback.mediumImpact();
+
+    final location = Provider.of<LocationService>(context, listen: false);
+    final routing = Provider.of<RoutingService>(context, listen: false);
+    final geo = Provider.of<GeoJsonService>(context, listen: false);
+
+    if (location.currentLocation == null) {
+      _announce('No se puede iniciar la prueba. Ubicación no disponible.');
+      return;
+    }
+
+    if (!geo.isLoaded) {
+      await geo.load();
+    }
+
+    if (!location.canStartNavigation()) {
+      _announce('No se puede iniciar la prueba de navegación ahora.');
+      return;
+    }
+
+    final origin = location.currentLocation!;
+    if (!geo.isInsideCampus(origin.latitude, origin.longitude)) {
+      _announce('Debes estar dentro del campus para probar la navegación.');
+      return;
+    }
+
+    final destination = _pickTestDestination(geo, location);
+    if (destination == null) {
+      _announce('No encontré un destino cercano para la prueba.');
+      return;
+    }
+
+    _announce('Iniciando prueba de ruta hacia ${destination.name}.');
+
+    final route = await routing.buildRoute(
+      originLat: origin.latitude,
+      originLng: origin.longitude,
+      destinationLat: destination.latitude,
+      destinationLng: destination.longitude,
+      originPolygon: geo
+          .getPlaceContaining(origin.latitude, origin.longitude)
+          ?.polygon,
+      destinationPolygon: destination.polygon,
+    );
+
+    if (route == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No se pudo generar una ruta de prueba.'),
+          backgroundColor: Color(0xFFB00020),
+        ),
+      );
+      return;
+    }
+
+    final voice = Provider.of<VoiceGuidanceService>(context, listen: false);
+    await voice.startNavigation(
+      route: route,
+      locationService: location,
+      routingService: routing,
+      destinationName: destination.name,
+      destinationLat: destination.latitude,
+      destinationLng: destination.longitude,
+      announceForTalkBack: _announce,
+      landmarkResolver: (lat, lng) => geo.getNearestBlockReference(lat, lng),
+      skipInitialCalibration: true,
+    );
+
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => NavigationMapScreen(
+          destinationName: destination.name,
+          startLat: origin.latitude,
+          startLng: origin.longitude,
+          destLat: destination.latitude,
+          destLng: destination.longitude,
+          highlightCategoryId: destination.primaryCategory,
+          initialRoute: route,
+          destinationPolygon: destination.polygon,
+          autoStartSimulation: true,
+        ),
+      ),
+    );
+  }
+
   Future<void> _onSelected(CampusPlace place) async {
     HapticFeedback.heavyImpact();
     final location = Provider.of<LocationService>(context, listen: false);
@@ -352,8 +466,6 @@ class _MainScreenState extends State<MainScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const _VoiceGuidanceCard(),
-
                       // HU-13: Lista de 3 cercanos + botón ver más
                       _NearbySection(
                         onSeeMore: _openNearby,
@@ -415,6 +527,39 @@ class _MainScreenState extends State<MainScreen> {
                           ),
                         ),
                       ),
+
+                      Padding(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: responsiveSpace(context, 16),
+                        ),
+                        child: Semantics(
+                          button: true,
+                          label: 'Test ruta',
+                          hint:
+                              'Inicia una navegación de prueba y la recorre automáticamente',
+                          child: SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              onPressed: _startRouteTest,
+                              icon: const Icon(Icons.route_rounded),
+                              label: const Text('Test ruta'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF1565C0),
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 16,
+                                ),
+                                textStyle: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 12),
 
                       Padding(
                         padding: EdgeInsets.symmetric(
