@@ -100,6 +100,68 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     await _voiceService?.speakMessage(message);
   }
 
+  Future<void> _openGuidanceSettings() async {
+    final voice = _voiceService;
+    if (voice == null) return;
+
+    var periodicEnabled = voice.periodicProgressConfirmationsEnabled;
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF12263A),
+              title: const Text(
+                'Configuración de guía',
+                style: TextStyle(color: Colors.white),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SwitchListTile(
+                    value: periodicEnabled,
+                    onChanged: (enabled) async {
+                      setDialogState(() => periodicEnabled = enabled);
+                      await voice.setPeriodicProgressConfirmationsEnabled(
+                        enabled,
+                      );
+                      if (!mounted) return;
+                      final message = enabled
+                          ? 'Confirmaciones periódicas de progreso activadas.'
+                          : 'Confirmaciones periódicas de progreso desactivadas.';
+                      await _announceAndSpeak(message);
+                    },
+                    title: const Text(
+                      'Confirmaciones periódicas',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                    subtitle: const Text(
+                      'Recibe mensajes automáticos de avance durante la ruta.',
+                      style: TextStyle(color: Colors.white70),
+                    ),
+                    activeColor: const Color(0xFF82B1FF),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text(
+                    'Cerrar',
+                    style: TextStyle(color: Color(0xFF82B1FF)),
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   void _syncVoiceGuidanceState() {
     final voice = _voiceService;
     if (voice == null || !mounted) return;
@@ -201,6 +263,28 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
   String _formatDistance(double meters) {
     if (meters >= 1000) return '${(meters / 1000).toStringAsFixed(1)} km';
     return '${meters.round()} m';
+  }
+
+  String _formatAccuracy(double? accuracyMeters) {
+    if (accuracyMeters == null || !accuracyMeters.isFinite) return '--';
+    return '±${accuracyMeters.round()} m';
+  }
+
+  int _nextStepIndex(LatLng current) {
+    if (_routeSteps.isEmpty) return 0;
+
+    for (var i = 0; i < _routeSteps.length; i++) {
+      final step = _routeSteps[i];
+      final d = _distanceMeters(
+        current.latitude,
+        current.longitude,
+        step.endPoint.latitude,
+        step.endPoint.longitude,
+      );
+      if (d > 10) return i;
+    }
+
+    return _routeSteps.length - 1;
   }
 
   String _normalizeText(String text) {
@@ -526,7 +610,7 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     if (_routeSimulationRunning) {
       await _stopRouteSimulation();
     }
-    await _cancelNavigation();
+    await _finishNavigation();
   }
 
   Future<void> _loadLocalRoute({required LatLng origin}) async {
@@ -1092,12 +1176,11 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     final geo = Provider.of<GeoJsonService>(context, listen: false);
     final polygons = _buildCampusPolygons(geo);
     final polygonLabels = _buildPolygonLabels(geo);
-    final voice = _voiceService;
-    final currentInstruction = voice != null && voice.currentInstruction.isNotEmpty
-      ? voice.currentInstruction
-      : (_routeSteps.isNotEmpty
-        ? _routeSteps.first.instruction
-        : 'Sin indicaciones disponibles todavía.');
+    final selectedLabel = widget.highlightCategoryId == null
+        ? null
+        : geo.categoryById(widget.highlightCategoryId!)?.label;
+    final nextIndex = _nextStepIndex(_currentUser);
+    final nextSteps = _routeSteps.skip(nextIndex).take(3).toList();
     final waitingExitText = _waitingExitPlaceName == null
         ? 'Estás dentro de un área. Sal para iniciar la navegación.'
         : 'Estás dentro de ${_normalizeText(_waitingExitPlaceName!)}. Sal para iniciar la navegación.';
@@ -1288,7 +1371,7 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                                     ),
                                   ),
                                 ),
-                              ),
+                              ],
                               const SizedBox(height: 10),
 
                               // Panel principal de métricas e indicaciones
@@ -1559,6 +1642,7 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                               ],
                             ),
                           ),
+                        ),
                       ),
                     ),
                   ],
@@ -1593,6 +1677,59 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _MetricChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+
+  const _MetricChip({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white24),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: const Color(0xFF82B1FF), size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white54, fontSize: 11),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
