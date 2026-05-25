@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../services/geojson_service.dart';
 import '../services/location_service.dart';
 import '../models/campus_place.dart';
+import '../utils/accessibility_scale.dart';
 import 'place_detail_screen.dart';
 
 class DestinationScreen extends StatefulWidget {
@@ -88,7 +89,9 @@ class _DestinationScreenState extends State<DestinationScreen> {
   List<List<CampusPlace>> _buildGroups(List<CampusPlace> places) {
     final groups = <List<CampusPlace>>[];
     for (int i = 0; i < places.length; i += _groupSize) {
-      final end = (i + _groupSize < places.length) ? i + _groupSize : places.length;
+      final end = (i + _groupSize < places.length)
+          ? i + _groupSize
+          : places.length;
       groups.add(places.sublist(i, end));
     }
     return groups;
@@ -123,7 +126,9 @@ class _DestinationScreenState extends State<DestinationScreen> {
   void _onTap(CampusPlace place) {
     setState(() => _selected = place);
     HapticFeedback.lightImpact();
-    _announce('Seleccionado: ${place.name}. Toca Confirmar al final para continuar.');
+    _announce(
+      'Seleccionado: ${place.name}. Toca Confirmar al final para continuar.',
+    );
   }
 
   void _confirm() {
@@ -135,8 +140,9 @@ class _DestinationScreenState extends State<DestinationScreen> {
   @override
   Widget build(BuildContext context) {
     // HU-19: textScaleFactor para detectar fuente grande del sistema
-    final textScale = MediaQuery.of(context).textScaler.scale(1.0);
+    final textScale = clampScaleFactor(context, maxScale: 1.5);
     final isLargeText = textScale > 1.3;
+    final titleScaler = clampedTextScaler(context, maxScale: 1.3);
 
     return Scaffold(
       backgroundColor: const Color(0xFF0D1B2A),
@@ -157,6 +163,9 @@ class _DestinationScreenState extends State<DestinationScreen> {
           child: ExcludeSemantics(
             child: Text(
               widget.categoryName,
+              textScaler: titleScaler,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(color: Colors.white, fontSize: 20),
             ),
           ),
@@ -167,16 +176,18 @@ class _DestinationScreenState extends State<DestinationScreen> {
           children: [
             // Lista ocupa el espacio disponible
             Expanded(
-              child: _PlaceList(
-                selected: _selected,
-                onTap: _onTap,
-              ),
+              child: _PlaceList(selected: _selected, onTap: _onTap),
             ),
 
             // HU-19: Botones en columna cuando la fuente es grande,
             // para que no se salgan de pantalla
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+              padding: EdgeInsets.fromLTRB(
+                responsiveSpace(context, 16),
+                0,
+                responsiveSpace(context, 16),
+                responsiveSpace(context, 4),
+              ),
               child: isLargeText
                   ? _buildButtonsColumn()
                   : _buildButtonsNormal(),
@@ -224,6 +235,7 @@ class _DestinationScreenState extends State<DestinationScreen> {
   }
 
   Widget _buildListenButton({bool compact = false}) {
+    final textScaler = clampedTextScaler(context);
     return Semantics(
       button: true,
       label: 'Escuchar opciones de nuevo',
@@ -236,10 +248,14 @@ class _DestinationScreenState extends State<DestinationScreen> {
             await _announceNextGroup();
           },
           icon: const Icon(Icons.record_voice_over_rounded),
-          label: const Text('Escuchar opciones de nuevo'),
+          label: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text('Escuchar opciones de nuevo', textScaler: textScaler),
+          ),
           style: OutlinedButton.styleFrom(
             foregroundColor: Colors.white,
             side: const BorderSide(color: Color(0xFF82B1FF)),
+            minimumSize: const Size(double.infinity, 48),
             // HU-19: padding vertical adaptable
             padding: EdgeInsets.symmetric(vertical: compact ? 10 : 14),
           ),
@@ -249,6 +265,7 @@ class _DestinationScreenState extends State<DestinationScreen> {
   }
 
   Widget _buildInfoButton({bool compact = false}) {
+    final textScaler = clampedTextScaler(context);
     return Semantics(
       button: true,
       label: 'Escuchar información del lugar seleccionado',
@@ -259,10 +276,14 @@ class _DestinationScreenState extends State<DestinationScreen> {
             await _speakBasicInfo(_selected!);
           },
           icon: const Icon(Icons.info_outline),
-          label: const Text('Escuchar información'),
+          label: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text('Escuchar información', textScaler: textScaler),
+          ),
           style: OutlinedButton.styleFrom(
             foregroundColor: Colors.white,
             side: const BorderSide(color: Color(0xFF82B1FF)),
+            minimumSize: const Size(double.infinity, 48),
             padding: EdgeInsets.symmetric(vertical: compact ? 10 : 14),
           ),
         ),
@@ -271,6 +292,7 @@ class _DestinationScreenState extends State<DestinationScreen> {
   }
 
   Widget _buildDetailButton({bool compact = false}) {
+    final textScaler = clampedTextScaler(context);
     return SizedBox(
       width: double.infinity,
       child: OutlinedButton.icon(
@@ -283,10 +305,14 @@ class _DestinationScreenState extends State<DestinationScreen> {
           );
         },
         icon: const Icon(Icons.menu_book),
-        label: const Text('Ver información detallada'),
+        label: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text('Ver información detallada', textScaler: textScaler),
+        ),
         style: OutlinedButton.styleFrom(
           foregroundColor: Colors.white,
           side: const BorderSide(color: Color(0xFF82B1FF)),
+          minimumSize: const Size(double.infinity, 48),
           padding: EdgeInsets.symmetric(vertical: compact ? 10 : 14),
         ),
       ),
@@ -295,6 +321,7 @@ class _DestinationScreenState extends State<DestinationScreen> {
 
   Widget _buildConfirmButton({bool compact = false}) {
     final hasSelection = _selected != null;
+    final textScaler = clampedTextScaler(context);
     return Semantics(
       button: true,
       label: hasSelection
@@ -303,16 +330,17 @@ class _DestinationScreenState extends State<DestinationScreen> {
       hint: hasSelection ? 'Toca dos veces para confirmar' : '',
       child: SizedBox(
         width: double.infinity,
-        // HU-19: altura mínima adaptable en vez de fija
-        height: compact ? 52 : 60,
         child: ElevatedButton(
           onPressed: hasSelection ? _confirm : null,
           style: ElevatedButton.styleFrom(
-            backgroundColor:
-                hasSelection ? const Color(0xFF2E7D32) : Colors.grey[800],
+            backgroundColor: hasSelection
+                ? const Color(0xFF2E7D32)
+                : Colors.grey[800],
             foregroundColor: Colors.white,
             shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12)),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            minimumSize: Size(double.infinity, compact ? 52 : 60),
             textStyle: TextStyle(
               fontSize: compact ? 16 : 18,
               fontWeight: FontWeight.bold,
@@ -329,7 +357,12 @@ class _DestinationScreenState extends State<DestinationScreen> {
                   size: compact ? 20 : 24,
                 ),
                 const SizedBox(width: 10),
-                const Text('Confirmar'),
+                Flexible(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text('Confirmar', textScaler: textScaler),
+                  ),
+                ),
               ],
             ),
           ),
@@ -340,7 +373,8 @@ class _DestinationScreenState extends State<DestinationScreen> {
 
   Future<void> _speakBasicInfo(CampusPlace place) async {
     final info = place.basicInfo();
-    final message = '''
+    final message =
+        '''
 ${info['nombre']}.
 Tipo: ${info['tipo']}.
 ${info['descripcion']}.
@@ -357,6 +391,7 @@ class _PlaceList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final textScaler = clampedTextScaler(context);
     return Consumer2<GeoJsonService, LocationService>(
       builder: (_, geo, loc, __) {
         if (!geo.isLoaded) {
@@ -370,10 +405,12 @@ class _PlaceList extends StatelessWidget {
         if (places.isEmpty) {
           return Semantics(
             label: 'No se encontraron lugares en esta categoría',
-            child: const Center(
+            child: Center(
               child: ExcludeSemantics(
                 child: Text(
                   'No hay lugares en esta categoría',
+                  textScaler: textScaler,
+                  softWrap: true,
                   style: TextStyle(color: Colors.white54, fontSize: 16),
                 ),
               ),
@@ -384,7 +421,12 @@ class _PlaceList extends StatelessWidget {
         final here = loc.currentLocation;
 
         return ListView.builder(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          padding: EdgeInsets.fromLTRB(
+            responsiveSpace(context, 16),
+            responsiveSpace(context, 12),
+            responsiveSpace(context, 16),
+            0,
+          ),
           itemCount: places.length,
           itemBuilder: (_, i) {
             final place = places[i];
@@ -406,9 +448,9 @@ class _PlaceList extends StatelessWidget {
               enabled: true,
               label: isSelected
                   ? 'Opción ${i + 1} de ${places.length}: ${place.name}'
-                      '${distText.isNotEmpty ? ", $distText" : ""}. Seleccionado'
+                        '${distText.isNotEmpty ? ", $distText" : ""}. Seleccionado'
                   : 'Opción ${i + 1} de ${places.length}: ${place.name}'
-                      '${distText.isNotEmpty ? ", $distText" : ""}',
+                        '${distText.isNotEmpty ? ", $distText" : ""}',
               hint: isSelected
                   ? 'Ya seleccionado. Toca Confirmar para continuar'
                   : 'Toca dos veces para seleccionar',
@@ -428,10 +470,12 @@ class _PlaceList extends StatelessWidget {
                   ),
                 ),
                 child: ListTile(
+                  minLeadingWidth: 48,
+                  minVerticalPadding: responsiveSpace(context, 10),
                   onTap: () => onTap(place),
                   leading: Container(
-                    width: 40,
-                    height: 40,
+                    width: 48,
+                    height: 48,
                     decoration: BoxDecoration(
                       color: isSelected
                           ? const Color(0xFF1565C0)
@@ -440,13 +484,19 @@ class _PlaceList extends StatelessWidget {
                     ),
                     child: Icon(
                       geo.iconForPlace(place),
-                      color: isSelected ? Colors.white : const Color(0xFF82B1FF),
+                      color: isSelected
+                          ? Colors.white
+                          : const Color(0xFF82B1FF),
                       size: 22,
                     ),
                   ),
                   title: ExcludeSemantics(
                     child: Text(
                       place.name,
+                      textScaler: textScaler,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      softWrap: true,
                       style: TextStyle(
                         color: isSelected ? Colors.white : Colors.white70,
                         fontWeight: isSelected
@@ -462,23 +512,34 @@ class _PlaceList extends StatelessWidget {
                       children: [
                         Text(
                           place.description.split('\n').first,
+                          textScaler: textScaler,
                           style: const TextStyle(
-                              color: Colors.white38, fontSize: 13),
+                            color: Colors.white38,
+                            fontSize: 13,
+                          ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
                         if (distText.isNotEmpty)
                           Text(
                             distText,
+                            textScaler: textScaler,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
-                                color: Color(0xFF82B1FF), fontSize: 12),
+                              color: Color(0xFF82B1FF),
+                              fontSize: 12,
+                            ),
                           ),
                       ],
                     ),
                   ),
                   trailing: isSelected
-                      ? const Icon(Icons.check_circle_rounded,
-                          color: Color(0xFF1565C0), size: 22)
+                      ? const Icon(
+                          Icons.check_circle_rounded,
+                          color: Color(0xFF1565C0),
+                          size: 22,
+                        )
                       : null,
                 ),
               ),
