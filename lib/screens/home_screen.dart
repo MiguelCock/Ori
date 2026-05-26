@@ -3,10 +3,10 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-// Haptic moved to main screen; keep HomeScreen minimal
 import 'permission_screen.dart';
 import 'main_screen.dart';
 import 'tutorial_screen.dart';
+import 'validation_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -39,22 +39,40 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _runStartupFlow() async {
     if (!mounted) return;
+
     // HU-27: la primera vez que se abre la app mostramos el tutorial
-    // accesible antes del flujo normal de permisos.
     final prefs = await SharedPreferences.getInstance();
-    final tutorialCompleted =
-        prefs.getBool(kTutorialCompletedPrefKey) ?? false;
+    final tutorialCompleted = prefs.getBool(kTutorialCompletedPrefKey) ?? false;
+
     if (!tutorialCompleted) {
       if (!mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => const TutorialScreen()),
       );
     }
+
+    if (!mounted) return;
+
+    // HU-21: Validación de compatibilidad (solo primera vez)
+    final validationCompleted = prefs.getBool('validation_completed') ?? false;
+    if (!validationCompleted) {
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ValidationScreen(
+            onValidationComplete: () async {
+              await prefs.setBool('validation_completed', true);
+              if (!mounted) return;
+              Navigator.of(context).pop();
+            },
+          ),
+        ),
+      );
+    }
+
     if (!mounted) return;
     await _checkIfAlreadyAccepted();
   }
-
-  // Startup vibration test removed — moved to main screen as a single manual control.
 
   /// Si ya aceptó permisos antes, va directo a MainScreen
   Future<void> _checkIfAlreadyAccepted() async {
@@ -153,8 +171,6 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!mounted) return;
     _mainButtonFocusNode.requestFocus();
   }
-
-  // Vibrate handler removed from HomeScreen — centralised on MainScreen.
 
   @override
   Widget build(BuildContext context) {
