@@ -164,8 +164,9 @@ class _TutorialScreenState extends State<TutorialScreen> {
     final voice = Provider.of<VoiceGuidanceService>(context, listen: false);
     final text = _step.spoken;
 
-    _announce(text);
-
+    // Si hay lector de pantalla, evitamos anunciar explícitamente para
+    // no duplicar con el `liveRegion` del widget visual; dejamos que
+    // el framework anuncie el contenido del paso.
     if (_accessibilityActive) {
       _scheduleAutoAdvance(myToken, _estimatedReadingDuration(text));
       return;

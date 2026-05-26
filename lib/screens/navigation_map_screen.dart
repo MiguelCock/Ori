@@ -91,6 +91,12 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     );
   }
 
+  bool get _accessibilityActive {
+    return SemanticsBinding.instance.semanticsEnabled ||
+        WidgetsBinding.instance.platformDispatcher.accessibilityFeatures
+            .accessibleNavigation;
+  }
+
   Future<void> _announceAndSpeak(String message) async {
     await _announce(message);
     await _voiceService?.speakMessage(message);
@@ -424,13 +430,27 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
   }
 
   Future<void> _showArrivalOverlay() async {
-    try {
-      await HapticService.trigger(HapticEvent.destinationReached);
-    } catch (_) {}
+    // Mostrar dialogo de celebración con vibración y luego cerrar la pantalla.
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => _ArrivalCelebrationDialog(destination: widget.destinationName),
+    );
 
-    await Future<void>.delayed(const Duration(milliseconds: 900));
     if (!mounted) return;
     Navigator.of(context).maybePop();
+  }
+
+  Future<void> _togglePauseNavigation() async {
+    final voice = _voiceService;
+    if (voice == null) return;
+    if (voice.isPaused) {
+      await voice.resumeNavigation();
+      await _announce('Navegación reanudada.');
+    } else {
+      await voice.pauseNavigation();
+      await _announce('Navegación pausada.');
+    }
   }
 
   Future<void> _stopRouteSimulation() async {
@@ -860,7 +880,25 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     HapticFeedback.heavyImpact();
     final voice = _voiceService;
     if (voice != null) {
-      await voice.stopNavigation();
+      try {
+        // Detener cualquier reproducción de voz en curso inmediatamente
+        await voice.stopSpeaking();
+      } catch (_) {}
+      await voice.stopNavigation(speak: false);
+    }
+    if (!mounted) return;
+    Navigator.of(context).pop();
+  }
+
+  Future<void> _accessibleFinishNavigation() async {
+    // Acción invocada por el botón accesible cuando TalkBack está activo.
+    HapticFeedback.heavyImpact();
+    final voice = _voiceService;
+    if (voice != null) {
+      try {
+        await voice.stopSpeaking();
+      } catch (_) {}
+      await voice.stopNavigation(speak: false);
     }
     if (!mounted) return;
     Navigator.of(context).pop();
@@ -1095,11 +1133,105 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                       ),
                     ),
                   ),
+                // Botón grande accesible para finalizar la navegación (útil con TalkBack)
+                if (_accessibilityActive && voice != null && voice.isNavigating)
+                  Positioned(
+                    left: 20,
+                    right: 20,
+                    bottom: 18,
+                    child: Semantics(
+                      button: true,
+                      label: 'Finalizar navegación',
+                      hint: 'Toca dos veces para detener la voz y cerrar la navegación',
+                      child: ElevatedButton(
+                        onPressed: _accessibleFinishNavigation,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFB71C1C),
+                          padding: const EdgeInsets.symmetric(vertical: 18),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: const Text('Finalizar navegación', style: TextStyle(fontSize: 18)),
+                      ),
+                    ),
+                  ),
               ],
             );
               },
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ArrivalCelebrationDialog extends StatefulWidget {
+  final String destination;
+  const _ArrivalCelebrationDialog({required this.destination});
+
+  @override
+  State<_ArrivalCelebrationDialog> createState() => _ArrivalCelebrationDialogState();
+}
+
+class _ArrivalCelebrationDialogState extends State<_ArrivalCelebrationDialog>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..forward();
+
+    // Trigger haptic pattern and auto-close after a short celebration.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      try {
+        await HapticService.trigger(HapticEvent.destinationReached);
+      } catch (_) {}
+      await Future<void>.delayed(const Duration(milliseconds: 1200));
+      if (mounted) Navigator.of(context).pop();
+    });
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: const Color(0xFF0B1620),
+      child: Padding(
+        padding: const EdgeInsets.all(18.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ScaleTransition(
+              scale: CurvedAnimation(parent: _ctrl, curve: Curves.elasticOut),
+              child: const Icon(Icons.celebration_rounded, size: 64, color: Color(0xFF66BB6A)),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Has llegado',
+              style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              widget.destination,
+              style: const TextStyle(color: Colors.white70, fontSize: 16),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'La navegación se cerrará en un momento.',
+              style: TextStyle(color: Colors.white54, fontSize: 12),
+            ),
+          ],
         ),
       ),
     );

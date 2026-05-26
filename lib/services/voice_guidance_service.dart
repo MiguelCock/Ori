@@ -380,6 +380,18 @@ class VoiceGuidanceService extends ChangeNotifier {
     });
   }
 
+  /// Detener cualquier reproducción TTS en curso.
+  Future<void> stopSpeaking() async {
+    await _enqueueVoiceTask(() async {
+      try {
+        await _tts.stop();
+        debugPrint('⏹️ TTS detenido');
+      } catch (e) {
+        debugPrint('Error deteniendo TTS: $e');
+      }
+    });
+  }
+
   double getRemainingDistance(double currentLat, double currentLng) {
     if (_steps.isEmpty || _currentStepIndex >= _steps.length) return 0;
 
@@ -1222,23 +1234,38 @@ class VoiceGuidanceService extends ChangeNotifier {
     await _enqueueVoiceTask(() async {
       try {
         await _initTts();
-        if (!_ttsReady) {
-          debugPrint('❌ TTS no listo para: $text');
-          return;
-        }
-        
-        debugPrint('🔊 SPEAK: $text');
-        await _tts.speak(text);
-        
+
         final semanticsOn = SemanticsBinding.instance.semanticsEnabled;
         final accessibleNavOn = WidgetsBinding
             .instance
             .platformDispatcher
             .accessibilityFeatures
             .accessibleNavigation;
-        if (semanticsOn || accessibleNavOn) {
-          await _announceForTalkBack?.call(text);
+
+        final accessibilityActive = semanticsOn || accessibleNavOn || _suppressTtsWhenAccessibilityActive;
+
+        // Si hay un lector de pantalla activo preferimos anunciar mediante
+        // el callback que nos suministró la UI (announceForTalkBack) o el
+        // announcer permanente, evitando así la duplicidad TTS + TalkBack.
+        if (accessibilityActive) {
+          if (_announceForTalkBack != null) {
+            await _announceForTalkBack!.call(text);
+            return;
+          }
+          if (_permanentAnnouncer != null) {
+            await _permanentAnnouncer!.call(text);
+            return;
+          }
+          // Como último recurso, si no hay announcer disponible, usar TTS.
         }
+
+        if (!_ttsReady) {
+          debugPrint('❌ TTS no listo para: $text');
+          return;
+        }
+
+        debugPrint('🔊 SPEAK: $text');
+        await _tts.speak(text);
       } catch (e) {
         debugPrint('Error de voz: $e');
       }

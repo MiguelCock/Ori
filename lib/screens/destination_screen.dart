@@ -9,7 +9,7 @@ import 'place_detail_screen.dart';
 
 class DestinationScreen extends StatefulWidget {
   final String categoryName;
-  final Function(CampusPlace) onDestinationSelected;
+  final void Function(CampusPlace) onDestinationSelected;
 
   const DestinationScreen({
     super.key,
@@ -44,7 +44,7 @@ class _DestinationScreenState extends State<DestinationScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _announce(
         'Lista de ${widget.categoryName}. '
-        'Desliza para explorar los lugares. Toca dos veces para seleccionar.',
+        'Desliza para explorar los lugares. Toca dos veces para seleccionar y abrir el lugar.',
       );
       _geo = Provider.of<GeoJsonService>(context, listen: false);
       _geo?.addListener(_onGeoUpdated);
@@ -123,10 +123,13 @@ class _DestinationScreenState extends State<DestinationScreen> {
   void _onTap(CampusPlace place) {
     setState(() => _selected = place);
     HapticFeedback.lightImpact();
-    _announce('Seleccionado: ${place.name}. Toca Confirmar al final para continuar.');
+    _announce('Seleccionado: ${place.name}. Abriendo...');
+    // Abrir inmediatamente la navegación o detalle sin paso extra de confirmación
+    widget.onDestinationSelected(place);
   }
 
   void _confirm() {
+    // Método obsoleto: la selección abre directamente.
     if (_selected == null) return;
     HapticFeedback.heavyImpact();
     widget.onDestinationSelected(_selected!);
@@ -199,8 +202,6 @@ class _DestinationScreenState extends State<DestinationScreen> {
           const SizedBox(height: 4),
           _buildDetailButton(),
         ],
-        const SizedBox(height: 4),
-        _buildConfirmButton(),
       ],
     );
   }
@@ -217,8 +218,6 @@ class _DestinationScreenState extends State<DestinationScreen> {
           const SizedBox(height: 2),
           _buildDetailButton(compact: true),
         ],
-        const SizedBox(height: 2),
-        _buildConfirmButton(compact: true),
       ],
     );
   }
@@ -277,7 +276,7 @@ class _DestinationScreenState extends State<DestinationScreen> {
         onPressed: () {
           Navigator.push(
             context,
-            MaterialPageRoute(
+            MaterialPageRoute<void>(
               builder: (_) => PlaceDetailScreen(place: _selected!),
             ),
           );
@@ -293,50 +292,7 @@ class _DestinationScreenState extends State<DestinationScreen> {
     );
   }
 
-  Widget _buildConfirmButton({bool compact = false}) {
-    final hasSelection = _selected != null;
-    return Semantics(
-      button: true,
-      label: hasSelection
-          ? 'Confirmar'
-          : 'Confirmar. Primero selecciona un lugar',
-      hint: hasSelection ? 'Toca dos veces para confirmar' : '',
-      child: SizedBox(
-        width: double.infinity,
-        // HU-19: altura mínima adaptable en vez de fija
-        height: compact ? 52 : 60,
-        child: ElevatedButton(
-          onPressed: hasSelection ? _confirm : null,
-          style: ElevatedButton.styleFrom(
-            backgroundColor:
-                hasSelection ? const Color(0xFF2E7D32) : Colors.grey[800],
-            foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12)),
-            textStyle: TextStyle(
-              fontSize: compact ? 16 : 18,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          child: ExcludeSemantics(
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  hasSelection
-                      ? Icons.check_circle_rounded
-                      : Icons.touch_app_rounded,
-                  size: compact ? 20 : 24,
-                ),
-                const SizedBox(width: 10),
-                const Text('Confirmar'),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  
 
   Future<void> _speakBasicInfo(CampusPlace place) async {
     final info = place.basicInfo();
@@ -409,9 +365,9 @@ class _PlaceList extends StatelessWidget {
                       '${distText.isNotEmpty ? ", $distText" : ""}. Seleccionado'
                   : 'Opción ${i + 1} de ${places.length}: ${place.name}'
                       '${distText.isNotEmpty ? ", $distText" : ""}',
-              hint: isSelected
-                  ? 'Ya seleccionado. Toca Confirmar para continuar'
-                  : 'Toca dos veces para seleccionar',
+                hint: isSelected
+                  ? 'Seleccionado. Toca dos veces para abrir la navegación'
+                  : 'Toca dos veces para seleccionar y abrir',
               onTap: () => onTap(place),
               child: Container(
                 margin: const EdgeInsets.only(bottom: 8),
