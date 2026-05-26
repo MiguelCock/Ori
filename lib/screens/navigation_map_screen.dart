@@ -67,7 +67,6 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
   List<LatLng> _routePoints = [];
   List<GuidanceStep> _routeSteps = [];
   double? _routeDistanceMeters;
-  // HU-16: distancia restante calculada desde VoiceGuidanceService
   double? _remainingDistanceMeters;
 
   DateTime _lastRouteUpdate = DateTime.fromMillisecondsSinceEpoch(0);
@@ -127,6 +126,9 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
         _isLoading = false;
       }
     });
+
+    // Cuando la posición del usuario cambia, re-centrar el mapa en el GPS.
+    _centerMapOnUser();
   }
 
   Color _areaFillColor({required bool highlighted}) {
@@ -311,9 +313,6 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     }
 
     _voiceStarted = true;
-    // Detectar si las features de accesibilidad (p. ej. lector de pantalla)
-    // están activas y, en ese caso, solicitar al servicio de voz que
-    // suprima la reproducción TTS para evitar duplicidad.
     final semanticsBinding = SemanticsBinding.instance;
     final semanticsEnabled = semanticsBinding.semanticsEnabled;
     voice.setSuppressTtsWhenAccessibility(semanticsEnabled);
@@ -353,7 +352,7 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
 
   String _usageInstructionsText() {
     return 'Navegación iniciada. Toca una vez la pantalla para repetir tu ubicación e indicaciones. '
-        'Mantén presionada la pantalla para finalizar la navegación.';
+        'Usa el botón de volver para finalizar la navegación.';
   }
 
   Future<void> _showUsageInstructionsIfNeeded() async {
@@ -434,7 +433,6 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
   }
 
   Future<void> _showArrivalOverlay() async {
-    // Mostrar dialogo de celebración con vibración y luego cerrar la pantalla.
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
@@ -542,13 +540,6 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     }
   }
 
-  Future<void> _finishNavigationFromLongPress() async {
-    if (_routeSimulationRunning) {
-      await _stopRouteSimulation();
-    }
-    await _cancelNavigation();
-  }
-
   Future<void> _loadLocalRoute({required LatLng origin}) async {
     try {
       final routing = _routingService;
@@ -651,6 +642,15 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     }
   }
 
+  /// Centra el mapa sobre la posición actual del usuario con el zoom fijo.
+  void _centerMapOnUser() {
+    try {
+      _mapController.move(_currentUser, _currentZoom);
+    } catch (_) {
+      // El controlador puede no estar listo todavía; se ignora silenciosamente.
+    }
+  }
+
   void _onLocationChanged() {
     final here = _locationService?.currentLocation;
     if (here == null) return;
@@ -658,7 +658,6 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
 
     if (!mounted) return;
 
-    // HU-16: actualizar distancia restante desde VoiceGuidanceService
     final voice = _voiceService;
     final remaining = voice?.getRemainingDistance(
       here.latitude,
@@ -671,6 +670,9 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
           ? remaining
           : _routeDistanceMeters;
     });
+
+    // Re-centrar el mapa sobre el GPS cada vez que la posición cambie.
+    _centerMapOnUser();
 
     if (voice?.isNavigating == true) {
       return;
@@ -885,7 +887,6 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     final voice = _voiceService;
     if (voice != null) {
       try {
-        // Detener cualquier reproducción de voz en curso inmediatamente
         await voice.stopSpeaking();
       } catch (_) {}
       await voice.stopNavigation(speak: false);
@@ -894,18 +895,23 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     Navigator.of(context).pop();
   }
 
-  Future<void> _accessibleFinishNavigation() async {
-    // Acción invocada por el botón accesible cuando TalkBack está activo.
-    HapticFeedback.heavyImpact();
-    final voice = _voiceService;
-    if (voice != null) {
-      try {
-        await voice.stopSpeaking();
-      } catch (_) {}
-      await voice.stopNavigation(speak: false);
-    }
-    if (!mounted) return;
-    Navigator.of(context).pop();
+  /// Construye el label semántico del título para TalkBack.
+  /// Formato: "Ubicación, cerca de <referencia>, Destino <nombre>"
+  String _buildTitleSemanticLabel() {
+    final location = _locationService?.currentLocation;
+    final lat = location?.latitude ?? _currentUser.latitude;
+    final lng = location?.longitude ?? _currentUser.longitude;
+
+    final placeName = _geoService?.getPlaceContaining(lat, lng)?.name;
+    final nearbyRef = _geoService?.getNearestBlockReference(lat, lng);
+
+    final locationPart = placeName != null
+        ? 'Ubicación, ${_normalizeText(placeName)}'
+        : (nearbyRef != null
+            ? 'Ubicación, cerca de ${_normalizeText(nearbyRef)}'
+            : 'Ubicación actual');
+
+    return '$locationPart. Destino: ${_normalizeText(widget.destinationName)}';
   }
 
   @override
@@ -914,14 +920,20 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     final polygons = _buildCampusPolygons(geo);
     final polygonLabels = _buildPolygonLabels(geo);
     final voice = _voiceService;
+
     final currentInstruction = voice != null && voice.currentInstruction.isNotEmpty
-      ? voice.currentInstruction
-      : (_routeSteps.isNotEmpty
-        ? _routeSteps.first.instruction
-        : 'Sin indicaciones disponibles todavía.');
+        ? voice.currentInstruction
+        : (_routeSteps.isNotEmpty
+            ? _routeSteps.first.instruction
+            : 'Sin indicaciones disponibles todavía.');
+
     final waitingExitText = _waitingExitPlaceName == null
         ? 'Estás dentro de un área. Sal para iniciar la navegación.'
         : 'Estás dentro de ${_normalizeText(_waitingExitPlaceName!)}. Sal para iniciar la navegación.';
+
+    final displayedInstruction = _waitingExitPolygon != null
+        ? waitingExitText
+        : _normalizeText(currentInstruction);
 
     final routeNodeMarkers = <Marker>[];
     if (_routePoints.length >= 2) {
@@ -977,83 +989,139 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
       },
       child: Scaffold(
         backgroundColor: const Color(0xFF0D1B2A),
-        body: Semantics(
-          container: true,
-          label: 'Pantalla de navegación activa',
-          hint:
-              'Toca dos veces para repetir la instrucción actual. Mantén presionado para cancelar la navegación.',
-          onTapHint: 'Repetir instrucción',
-          onLongPressHint: 'Cancelar navegación',
-          onTap: _repeatCurrentGuidanceFromGesture,
-          onLongPress: _finishNavigationFromLongPress,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: _repeatCurrentGuidanceFromGesture,
-            onLongPress: _finishNavigationFromLongPress,
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final mapHeight = constraints.maxHeight / 3;
-                final topHeight = constraints.maxHeight - mapHeight;
+        body: LayoutBuilder(
+          builder: (context, constraints) {
+            final mapHeight = constraints.maxHeight / 3;
+            final topHeight = constraints.maxHeight - mapHeight;
 
             return Stack(
               children: [
+                // ── Capa 1: columna con header + mapa ──────────────────────
                 Column(
                   children: [
+                    // Header: botón volver + título + indicación
                     SizedBox(
                       height: topHeight,
                       child: SafeArea(
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Text(
-                                _normalizeText(widget.destinationName),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w700,
+                        bottom: false,
+                        child: Stack(
+                          children: [
+                            // ── Contenido visual (excluido de semantics) ──────
+                            // Todo lo visual se dibuja aquí, pero TalkBack lo
+                            // ignora por completo. Los nodos semánticos reales
+                            // son el botón y el título declarados abajo.
+                            ExcludeSemantics(
+                              child: Padding(
+                                padding: const EdgeInsets.fromLTRB(4, 10, 12, 10),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  children: [
+                                    // Fila visual: ← + título
+                                    SizedBox(
+                                      height: 48,
+                                      child: Row(
+                                        crossAxisAlignment: CrossAxisAlignment.center,
+                                        children: [
+                                          const SizedBox(width: 48), // espejo del botón
+                                          Expanded(
+                                            child: Text(
+                                              _normalizeText(widget.destinationName),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              textAlign: TextAlign.center,
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 18,
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 48),
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    // Indicación centrada
+                                    Expanded(
+                                      child: Center(
+                                        child: Text(
+                                          displayedInstruction,
+                                          textAlign: TextAlign.center,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 24,
+                                            fontWeight: FontWeight.w700,
+                                            height: 1.2,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    // Distancia restante (solo visual)
+                                    Text(
+                                      _remainingDistanceMeters == null
+                                          ? 'Distancia restante no disponible.'
+                                          : 'Distancia restante: ${_formatDistance(_remainingDistanceMeters!)}.',
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    // Hint visual (solo visual)
+                                    Text(
+                                      'Toca una vez la pantalla para repetir la indicación.',
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                        color: Colors.white54,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
-                              const SizedBox(height: 10),
-                              Text(
-                                _waitingExitPolygon != null
-                                    ? waitingExitText
-                                    : _normalizeText(currentInstruction),
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 24,
-                                  fontWeight: FontWeight.w700,
-                                  height: 1.2,
+                            ),
+
+                            // ── Nodo semántico 1: Botón volver ───────────────
+                            Positioned(
+                              left: 0,
+                              top: 10,
+                              child: Semantics(
+                                button: true,
+                                label: 'Finalizar navegación',
+                                hint: 'Detiene la navegación y regresa',
+                                excludeSemantics: true,
+                                child: IconButton(
+                                  icon: const Icon(
+                                    Icons.arrow_back,
+                                    color: Colors.white,
+                                    size: 26,
+                                  ),
+                                  onPressed: _cancelNavigation,
+                                  tooltip: 'Finalizar navegación',
+                                  padding: const EdgeInsets.all(8),
                                 ),
                               ),
-                              const SizedBox(height: 8),
-                              Text(
-                                _remainingDistanceMeters == null
-                                    ? 'Distancia restante no disponible.'
-                                    : 'Distancia restante: ${_formatDistance(_remainingDistanceMeters!)}.',
-                                style: const TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 14,
-                                ),
+                            ),
+
+                            // ── Nodo semántico 2: Título ─────────────────────
+                            Positioned(
+                              left: 48,
+                              right: 48,
+                              top: 10,
+                              height: 48,
+                              child: Semantics(
+                                label: _buildTitleSemanticLabel(),
+                                excludeSemantics: true,
+                                child: const SizedBox.expand(),
                               ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'Toca una vez para repetir. Mantén presionado para cancelar.',
-                                style: const TextStyle(
-                                  color: Colors.white54,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
 
-                    // Mapa en el tercio inferior
+                    // ── CAMBIO 1: Mapa no interactuable, zoom fijo al GPS ──
                     SizedBox(
                       height: mapHeight,
                       width: double.infinity,
@@ -1063,56 +1131,86 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                           topRight: Radius.circular(18),
                         ),
                         child: ExcludeSemantics(
-                          child: FlutterMap(
-                            mapController: _mapController,
-                            options: MapOptions(
-                              initialCenter: _currentUser,
-                              initialZoom: _currentZoom,
-                              minZoom: minZoom,
-                              maxZoom: maxZoom,
-                              interactionOptions: const InteractionOptions(
-                                flags:
-                                    InteractiveFlag.drag |
-                                    InteractiveFlag.pinchZoom |
-                                    InteractiveFlag.doubleTapZoom |
-                                    InteractiveFlag.scrollWheelZoom,
+                          child: IgnorePointer(
+                            // El mapa no responde a ningún gesto del usuario.
+                            child: FlutterMap(
+                              mapController: _mapController,
+                              options: MapOptions(
+                                initialCenter: _currentUser,
+                                initialZoom: _currentZoom,
+                                minZoom: minZoom,
+                                maxZoom: maxZoom,
+                                // Sin flags de interacción: el mapa es estático.
+                                interactionOptions: const InteractionOptions(
+                                  flags: InteractiveFlag.none,
+                                ),
                               ),
-                              onPositionChanged: (camera, hasGesture) {
-                                _currentZoom = camera.zoom;
-                              },
-                            ),
-                            children: [
-                              TileLayer(
-                                urlTemplate:
-                                    'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                                userAgentPackageName: 'campus_guia',
-                              ),
-                              if (polygons.isNotEmpty)
-                                PolygonLayer(polygons: polygons),
-                              if (_routePoints.length >= 2)
-                                PolylineLayer(
-                                  polylines: [
-                                    Polyline(
-                                      points: _routePoints,
-                                      strokeWidth: 5,
-                                      color: const Color(0xFF1976D2),
-                                    ),
+                              children: [
+                                TileLayer(
+                                  urlTemplate:
+                                      'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                  userAgentPackageName: 'campus_guia',
+                                ),
+                                if (polygons.isNotEmpty)
+                                  PolygonLayer(polygons: polygons),
+                                if (_routePoints.length >= 2)
+                                  PolylineLayer(
+                                    polylines: [
+                                      Polyline(
+                                        points: _routePoints,
+                                        strokeWidth: 5,
+                                        color: const Color(0xFF1976D2),
+                                      ),
+                                    ],
+                                  ),
+                                MarkerLayer(
+                                  markers: [
+                                    ...polygonLabels,
+                                    ...routeNodeMarkers,
+                                    userMarker,
                                   ],
                                 ),
-                              MarkerLayer(
-                                markers: [
-                                  ...polygonLabels,
-                                  ...routeNodeMarkers,
-                                  userMarker,
-                                ],
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
                       ),
                     ),
                   ],
                 ),
+
+                // ── CAMBIO 4: Contenedor transparente de indicación ─────────
+                // Ocupa toda la pantalla desde el final del header hasta abajo,
+                // de modo que los taps sobre el mapa los captura este widget
+                // y TalkBack lo lee como la indicación activa.
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  // Se posiciona a partir del área del header (topHeight) y
+                  // llega hasta el borde inferior de la pantalla.
+                  top: topHeight,
+                  bottom: 0,
+                  child: Semantics(
+                    // Focus por defecto: este es el primer elemento en recibir
+                    // el foco de TalkBack al entrar a la pantalla.
+                    focusable: true,
+                    focused: true,
+                    label: displayedInstruction,
+                    hint: 'Toca dos veces para repetir la indicación',
+                    onTapHint: 'Repetir indicación',
+                    onTap: _repeatCurrentGuidanceFromGesture,
+                    excludeSemantics: true,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: _repeatCurrentGuidanceFromGesture,
+                      // Contenedor completamente transparente; no dibuja nada
+                      // sobre el mapa, solo intercepta los eventos de toque.
+                      child: const SizedBox.expand(),
+                    ),
+                  ),
+                ),
+
+                // ── Overlays de carga y error (igual que antes) ─────────────
                 if (_isLoading)
                   const Positioned.fill(
                     child: IgnorePointer(
@@ -1137,34 +1235,9 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                       ),
                     ),
                   ),
-                // Botón grande accesible para finalizar la navegación (útil con TalkBack)
-                if (_accessibilityActive && voice != null && voice.isNavigating)
-                  Positioned(
-                    left: 20,
-                    right: 20,
-                    bottom: 18,
-                    child: Semantics(
-                      button: true,
-                      label: 'Finalizar navegación',
-                      hint: 'Toca dos veces para detener la voz y cerrar la navegación',
-                      child: ElevatedButton(
-                        onPressed: _accessibleFinishNavigation,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFB71C1C),
-                          padding: const EdgeInsets.symmetric(vertical: 18),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        child: const Text('Finalizar navegación', style: TextStyle(fontSize: 18)),
-                      ),
-                    ),
-                  ),
               ],
             );
-              },
-            ),
-          ),
+          },
         ),
       ),
     );
@@ -1191,7 +1264,6 @@ class _ArrivalCelebrationDialogState extends State<_ArrivalCelebrationDialog>
       duration: const Duration(milliseconds: 900),
     )..forward();
 
-    // Trigger haptic pattern and auto-close after a short celebration.
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       try {
         await HapticService.trigger(HapticEvent.destinationReached);
@@ -1241,4 +1313,3 @@ class _ArrivalCelebrationDialogState extends State<_ArrivalCelebrationDialog>
     );
   }
 }
-

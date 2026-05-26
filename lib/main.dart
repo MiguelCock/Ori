@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 import 'screens/home_screen.dart';
@@ -8,7 +9,12 @@ import 'services/routing_service.dart';
 import 'services/voice_guidance_service.dart';
 
 void main() {
-  runApp(const CampusGuiaApp());
+  WidgetsFlutterBinding.ensureInitialized();
+  SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+  ]).then((_) {
+    runApp(const CampusGuiaApp());
+  });
 }
 
 class CampusGuiaApp extends StatelessWidget {
