@@ -2,26 +2,19 @@
 // tutorial_screen.dart
 // HU-27: Tutorial accesible inicial.
 //
-// Se muestra automáticamente la primera vez que se abre la app
-// y también puede invocarse manualmente desde el botón Ayuda.
+// Dos modos según el lector de pantalla:
 //
-// Diseño:
-//   - 6 pasos cortos, claros y orientados al uso principal.
-//   - Auto-avance encadenado: el siguiente paso arranca al
-//     terminar el TTS del anterior (sin requerir pulsaciones).
-//     Si el lector de pantalla está activo se usa una duración
-//     estimada por longitud de texto para no atropellar a
-//     TalkBack / VoiceOver.
-//   - Totalmente navegable con lector de pantalla: cada paso
-//     se anuncia como liveRegion y los controles tienen
-//     Semantics propios.
-//   - Dos rutas de salida:
-//       Ruta A — el usuario llega al final del tutorial.
-//                Aparece una pantalla con "Repetir tutorial" y
-//                "Terminar tutorial".
-//       Ruta B — el usuario pulsa "Saltar" durante la
-//                reproducción y se cierra inmediatamente.
-//     "Saltar" sigue disponible durante cualquier repetición.
+//   Modo NORMAL (TalkBack/VoiceOver OFF):
+//     Experiencia animada de 6 pasos con TTS propio y
+//     auto-avance al terminar cada locución.
+//     Salidas: "Saltar" (cualquier momento) o llegar al final
+//     → pantalla de fin con "Repetir" y "Terminar".
+//
+//   Modo ACCESIBLE (TalkBack/VoiceOver ON):
+//     Página única con todos los pasos en un scroll continuo.
+//     TalkBack los lee a su propio ritmo sin interferencia.
+//     Sin timers, sin TTS propio, sin duplicaciones.
+//     Único botón al final: "Cerrar tutorial".
 // ============================================================
 
 import 'dart:async';
@@ -97,8 +90,297 @@ class TutorialScreen extends StatefulWidget {
 }
 
 class _TutorialScreenState extends State<TutorialScreen> {
+  bool get _accessibilityActive {
+    return SemanticsBinding.instance.semanticsEnabled ||
+        WidgetsBinding.instance.platformDispatcher.accessibilityFeatures
+            .accessibleNavigation;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_accessibilityActive) {
+      return const _AccessibleTutorial();
+    }
+    return const _AnimatedTutorial();
+  }
+}
+
+// ============================================================
+// MODO ACCESIBLE: bloque único de texto + botón saltar arriba
+// ============================================================
+
+// Pasos adaptados para el modo accesible: el primero no menciona
+// el botón saltar del modo animado (que no existe aquí), sino el
+// botón "Saltar tutorial" que sí está en esta vista.
+const List<TutorialStep> _kAccessibleSteps = [
+  TutorialStep(
+    title: 'Bienvenido a CampusGuía',
+    body:
+        'CampusGuía es tu guía de voz para moverte por la Universidad EAFIT. '
+        'Si quieres saltarlo, usa el botón Saltar tutorial arriba a la derecha.',
+  ),
+  TutorialStep(
+    title: 'Diseñada para tu lector de pantalla',
+    body:
+        'La aplicación es totalmente compatible con TalkBack y VoiceOver. '
+        'Recorre los botones deslizando el dedo y actívalos tocando dos veces.',
+  ),
+  TutorialStep(
+    title: 'Cómo empezar',
+    body:
+        'Al terminar el tutorial llegarás a la pantalla principal. '
+        'Allí verás los tres lugares más cercanos a ti con su distancia. '
+        'Toca cualquiera para que la aplicación calcule la ruta y te guíe.',
+  ),
+  TutorialStep(
+    title: 'Explorar más destinos',
+    body:
+        'Si tu destino no está entre los cercanos, busca por categorías como '
+        'bloques, baños, cafeterías o zonas de estudio. '
+        'Cada categoría te muestra los lugares ordenados del más cerca al más lejos.',
+  ),
+  TutorialStep(
+    title: 'Guía por voz durante el recorrido',
+    body:
+        'Durante la navegación, la aplicación te dará instrucciones paso a paso, '
+        'te avisará cuando pases junto a puntos de referencia, '
+        'y el celular vibrará al iniciar, al girar y al llegar al destino.',
+  ),
+  TutorialStep(
+    title: 'Listo para empezar',
+    body:
+        'Si te alejas del camino o pierdes el GPS, la aplicación te avisará y '
+        'recalculará la ruta. Eso es todo. '
+        'Cuando termines de leer, usa el botón Cerrar tutorial al final de la pantalla.',
+  ),
+];
+
+class _AccessibleTutorial extends StatefulWidget {
+  const _AccessibleTutorial();
+
+  @override
+  State<_AccessibleTutorial> createState() => _AccessibleTutorialState();
+}
+
+class _AccessibleTutorialState extends State<_AccessibleTutorial> {
+  bool _finishing = false;
+  final GlobalKey _contentKey = GlobalKey();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      // Enviar FocusSemanticEvent mueve el foco de accesibilidad de TalkBack
+      // directamente al nodo semántico del contenido del tutorial.
+      final ro = _contentKey.currentContext?.findRenderObject();
+      if (ro != null) {
+        ro.sendSemanticsEvent(const FocusSemanticEvent());
+      }
+    });
+  }
+
+  Future<void> _announce(String message) {
+    return SemanticsService.sendAnnouncement(
+      View.of(context),
+      message,
+      Directionality.of(context),
+    );
+  }
+
+  Future<void> _finishTutorial() async {
+    if (_finishing) return;
+    _finishing = true;
+    HapticFeedback.mediumImpact();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(kTutorialCompletedPrefKey, true);
+    } catch (_) {}
+    if (!mounted) return;
+    _announce('Tutorial cerrado.');
+    Navigator.of(context).pop();
+  }
+
+  // Construye el label semántico único con todo el contenido del tutorial.
+  String get _fullTutorialLabel {
+    final buffer = StringBuffer();
+    buffer.write('Tutorial de CampusGuía. ');
+    for (final step in _kAccessibleSteps) {
+      buffer.write('${step.title}. ${step.body} ');
+    }
+    return buffer.toString().trim();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scaler = clampedTextScaler(context);
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF0D1B2A),
+      body: SafeArea(
+        child: Padding(
+          padding: EdgeInsets.symmetric(
+            horizontal: responsiveSpace(context, 20),
+            vertical: responsiveSpace(context, 20),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Barra superior: encabezado + botón Saltar
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  ExcludeSemantics(
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.school_rounded,
+                          size: 22,
+                          color: Color(0xFF82B1FF),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Tutorial de CampusGuía',
+                          textScaler: scaler,
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Botón Saltar — siempre visible en modo accesible
+                  Semantics(
+                    button: true,
+                    label: 'Saltar tutorial',
+                    hint: 'Toca dos veces para cerrar el tutorial e ir a la app.',
+                    excludeSemantics: true,
+                    child: TextButton.icon(
+                      onPressed: _finishTutorial,
+                      icon: const Icon(
+                        Icons.skip_next_rounded,
+                        color: Color(0xFF82B1FF),
+                      ),
+                      label: const Text(
+                        'Saltar',
+                        style: TextStyle(
+                          color: Color(0xFF82B1FF),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        minimumSize: const Size(64, 44),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 24),
+
+              // Bloque único de contenido: un solo nodo semántico con
+              // todo el texto del tutorial para que TalkBack lo lea de corrido.
+              Expanded(
+                child: SingleChildScrollView(
+                  physics: const BouncingScrollPhysics(),
+                  child: Semantics(
+                    key: _contentKey,
+                    label: _fullTutorialLabel,
+                    excludeSemantics: true,
+                    focusable: true,
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          for (final step in _kAccessibleSteps) ...[
+                            Text(
+                              step.title,
+                              textScaler: scaler,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                                height: 1.25,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            Text(
+                              step.body,
+                              textScaler: scaler,
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 17,
+                                height: 1.45,
+                              ),
+                            ),
+                            const SizedBox(height: 28),
+                          ],
+                        ],
+                      ),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              // Botón de cierre al final
+              Semantics(
+                button: true,
+                label: 'Cerrar tutorial',
+                hint: 'Toca dos veces para cerrar el tutorial e ir a la aplicación.',
+                excludeSemantics: true,
+                child: ElevatedButton(
+                  onPressed: _finishTutorial,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2E7D32),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 22),
+                    minimumSize: const Size(double.infinity, 72),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    textStyle: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.check_circle_rounded, size: 28),
+                      SizedBox(width: 12),
+                      Text('Cerrar tutorial'),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================
+// MODO NORMAL: pasos animados + TTS propio (código original)
+// ============================================================
+
+class _AnimatedTutorial extends StatefulWidget {
+  const _AnimatedTutorial();
+
+  @override
+  State<_AnimatedTutorial> createState() => _AnimatedTutorialState();
+}
+
+class _AnimatedTutorialState extends State<_AnimatedTutorial> {
   int _index = 0;
-  bool _completed = false; // true cuando termina la voz del último paso
+  bool _completed = false;
   bool _finishing = false;
   Timer? _advanceTimer;
   int _playToken = 0;
@@ -116,7 +398,6 @@ class _TutorialScreenState extends State<TutorialScreen> {
         'El tutorial avanza solo. '
         'Si quieres saltarlo, pulsa el botón saltar en la esquina superior derecha.',
       );
-      // Pequeña pausa para que el anuncio inicial no se pise con el primer paso.
       Future.delayed(const Duration(milliseconds: 600), _playCurrentStep);
     });
   }
@@ -140,54 +421,25 @@ class _TutorialScreenState extends State<TutorialScreen> {
     );
   }
 
-  bool get _accessibilityActive {
-    return SemanticsBinding.instance.semanticsEnabled ||
-        WidgetsBinding.instance.platformDispatcher.accessibilityFeatures
-            .accessibleNavigation;
-  }
-
-  // Duración estimada para auto-avance cuando el TTS de la app está suprimido
-  // (caso TalkBack/VoiceOver activos). Pensada para dar tiempo de lectura
-  // cómoda al lector de pantalla sin ser estorbosa.
-  Duration _estimatedReadingDuration(String text) {
-    final seconds = (text.length / 13).clamp(4, 18).toDouble();
-    const pause = Duration(milliseconds: 2000);
-    return Duration(milliseconds: (seconds * 1000).round()) + pause;
-  }
-
   void _playCurrentStep() {
     _advanceTimer?.cancel();
     final myToken = ++_playToken;
-
     if (!mounted) return;
 
     final voice = Provider.of<VoiceGuidanceService>(context, listen: false);
-    final text = _step.spoken;
-
-    // Si hay lector de pantalla, evitamos anunciar explícitamente para
-    // no duplicar con el `liveRegion` del widget visual; dejamos que
-    // el framework anuncie el contenido del paso.
-    if (_accessibilityActive) {
-      _scheduleAutoAdvance(myToken, _estimatedReadingDuration(text));
-      return;
-    }
-
-    voice.speak(text).then((_) {
-      if (!mounted) return;
-      if (myToken != _playToken) return;
+    voice.speak(_step.spoken).then((_) {
+      if (!mounted || myToken != _playToken) return;
       _scheduleAutoAdvance(myToken, const Duration(milliseconds: 1200));
     }).catchError((_) {
-      if (!mounted) return;
-      if (myToken != _playToken) return;
-      _scheduleAutoAdvance(myToken, _estimatedReadingDuration(text));
+      if (!mounted || myToken != _playToken) return;
+      _scheduleAutoAdvance(myToken, const Duration(seconds: 4));
     });
   }
 
   void _scheduleAutoAdvance(int token, Duration delay) {
     _advanceTimer?.cancel();
     _advanceTimer = Timer(delay, () {
-      if (!mounted) return;
-      if (token != _playToken) return;
+      if (!mounted || token != _playToken) return;
       if (_index >= _kTutorialSteps.length - 1) {
         _onTutorialPlaybackFinished();
       } else {
@@ -205,7 +457,6 @@ class _TutorialScreenState extends State<TutorialScreen> {
       'Pulsa Repetir tutorial para escucharlo de nuevo, '
       'o Terminar tutorial para cerrarlo e ir a la aplicación.',
     );
-    // Llevar el foco a la acción principal del estado completado.
     Future.delayed(const Duration(milliseconds: 300), () {
       if (mounted) _endActionFocus.requestFocus();
     });
@@ -231,20 +482,15 @@ class _TutorialScreenState extends State<TutorialScreen> {
     _finishing = true;
     _advanceTimer?.cancel();
     _playToken++;
-
     HapticFeedback.mediumImpact();
-
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(kTutorialCompletedPrefKey, true);
     } catch (_) {}
-
     if (!mounted) return;
-
     try {
       Provider.of<VoiceGuidanceService>(context, listen: false).stopSpeaking();
     } catch (_) {}
-
     _announce(completed ? 'Tutorial finalizado.' : 'Tutorial omitido.');
     Navigator.of(context).pop();
   }
@@ -268,7 +514,7 @@ class _TutorialScreenState extends State<TutorialScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // ── Barra superior: contador + Saltar (solo durante reproducción) ──
+                // Barra superior
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -309,8 +555,7 @@ class _TutorialScreenState extends State<TutorialScreen> {
                           sortKey: const OrdinalSortKey(99),
                           button: true,
                           label: 'Saltar tutorial',
-                          hint:
-                              'Toca dos veces para cerrar el tutorial e ir a la app.',
+                          hint: 'Toca dos veces para cerrar el tutorial e ir a la app.',
                           onTap: () => _finishTutorial(completed: false),
                           child: TextButton.icon(
                             onPressed: () => _finishTutorial(completed: false),
@@ -340,7 +585,7 @@ class _TutorialScreenState extends State<TutorialScreen> {
 
                 const SizedBox(height: 12),
 
-                // ── Indicador de progreso (decorativo) ──
+                // Barra de progreso
                 ExcludeSemantics(
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(6),
@@ -355,7 +600,7 @@ class _TutorialScreenState extends State<TutorialScreen> {
 
                 const SizedBox(height: 24),
 
-                // ── Cuerpo: paso actual o pantalla de fin ──
+                // Cuerpo
                 Expanded(
                   child: SingleChildScrollView(
                     physics: const BouncingScrollPhysics(),
@@ -372,7 +617,7 @@ class _TutorialScreenState extends State<TutorialScreen> {
 
                 const SizedBox(height: 16),
 
-                // ── Acciones del estado completado ──
+                // Acciones del estado completado
                 if (_completed) ...[
                   FocusTraversalOrder(
                     order: const NumericFocusOrder(20),
@@ -384,15 +629,17 @@ class _TutorialScreenState extends State<TutorialScreen> {
                       button: true,
                       enabled: true,
                       label: 'Repetir tutorial',
-                      hint:
-                          'Toca dos veces para escuchar el tutorial desde el principio.',
+                      hint: 'Toca dos veces para escuchar el tutorial desde el principio.',
                       onTap: _onRestartTutorial,
                       child: OutlinedButton(
                         focusNode: _endActionFocus,
                         onPressed: _onRestartTutorial,
                         style: OutlinedButton.styleFrom(
                           foregroundColor: Colors.white,
-                          side: const BorderSide(color: Color(0xFF82B1FF), width: 1.5),
+                          side: const BorderSide(
+                            color: Color(0xFF82B1FF),
+                            width: 1.5,
+                          ),
                           padding: const EdgeInsets.symmetric(vertical: 22),
                           minimumSize: const Size(double.infinity, 72),
                           shape: RoundedRectangleBorder(
@@ -425,8 +672,7 @@ class _TutorialScreenState extends State<TutorialScreen> {
                       button: true,
                       enabled: true,
                       label: 'Terminar tutorial',
-                      hint:
-                          'Toca dos veces para cerrar el tutorial e ir a la aplicación.',
+                      hint: 'Toca dos veces para cerrar el tutorial e ir a la aplicación.',
                       onTap: () => _finishTutorial(completed: true),
                       child: ElevatedButton(
                         onPressed: () => _finishTutorial(completed: true),
@@ -482,8 +728,7 @@ class _StepBody extends StatelessWidget {
     return Semantics(
       sortKey: const OrdinalSortKey(2),
       liveRegion: true,
-      label:
-          'Paso $stepNumber de $totalSteps. ${step.title}. ${step.body}',
+      label: 'Paso $stepNumber de $totalSteps. ${step.title}. ${step.body}',
       child: ExcludeSemantics(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,

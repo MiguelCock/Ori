@@ -1070,7 +1070,7 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                                     const SizedBox(height: 6),
                                     // Hint visual (solo visual)
                                     Text(
-                                      'Toca una vez la pantalla para repetir la indicación.',
+                                      'Toca la pantalla para repetir la indicación.',
                                       textAlign: TextAlign.center,
                                       style: const TextStyle(
                                         color: Colors.white54,
@@ -1196,7 +1196,7 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                     focusable: true,
                     focused: true,
                     label: displayedInstruction,
-                    hint: 'Toca dos veces para repetir la indicación',
+                    hint: 'Toca para repetir la indicación',
                     onTapHint: 'Repetir indicación',
                     onTap: _repeatCurrentGuidanceFromGesture,
                     excludeSemantics: true,
