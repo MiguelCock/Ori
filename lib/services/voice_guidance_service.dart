@@ -10,15 +10,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'route_guidance_builder.dart';
 import 'location_service.dart';
 import 'routing_service.dart';
+import 'geojson_service.dart';
 import 'haptic_service.dart';
 
 typedef VoiceAnnouncer = Future<void> Function(String message);
 typedef LandmarkResolver = String? Function(double lat, double lng);
 typedef NavigationArrivalHandler = Future<void> Function();
 
-// ── HU-18: Mensajes del sistema centralizados ──
-// Todos los textos fijos que la app lee en voz están aquí.
-// Cambiar un mensaje = cambiar solo esta clase.
+// Mensajes del sistema centralizados
 class NavigationMessages {
   static String navigationStarted(String destination) =>
       'Navegación iniciada hacia $destination.';
@@ -50,7 +49,7 @@ class NavigationMessages {
       'Vas correctamente por la ruta. Próxima indicación en $nextInstructionMeters metros. '
       'Faltan $remainingDistanceText para llegar a $destination.';
 
-  static String passingLandmark(String landmark) => 'Junto a $landmark.';
+  static String passingLandmark(String landmark) => 'Estás pasando junto a $landmark.';
 
   static String noPointsForGuidance() =>
       'No hay suficientes puntos para guiar por voz.';
@@ -112,16 +111,29 @@ class VoiceGuidanceService extends ChangeNotifier {
   bool _arrivalHandled = false;
   bool _arrivalHapticTriggered = false;
   Future<void> _voiceQueue = Future<void>.value();
-  // Si true, cuando haya un lector de pantalla activo solo se usará
-  // el anuncio accesible (TalkBack) y no se reproducirá TTS local.
   bool _suppressTtsWhenAccessibilityActive = false;
 
-  // HU-16: Control de landmarks
+  // HU-16: Control de landmarks durante navegación
   String? _lastAnnouncedLandmark;
   DateTime _lastLandmarkAt = DateTime.fromMillisecondsSinceEpoch(0);
 
+  // BUG-08: flag que habilita los anuncios de puntos de referencia
+  bool _landmarksEnabled = true;
+
+  // NUEVO: Modo exploración (landmarks sin navegación)
+  bool _explorationModeEnabled = false;
+  Timer? _explorationTimer;
+  String? _lastExplorationLandmark;
+  DateTime _lastExplorationLandmarkAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  // Referencias permanentes para modo exploración
+  LocationService? _permanentLocationService;
+  GeoJsonService? _geoJsonServiceRef;
+  VoiceAnnouncer? _permanentAnnouncer;
+
   static const Duration _progressConfirmationInterval = Duration(seconds: 20);
-  static const Duration _minTimeBetweenLandmarks = Duration(seconds: 15);
+  static const Duration _minTimeBetweenLandmarks = Duration(seconds: 5);
+  static const Duration _minTimeBetweenExplorationLandmarks = Duration(seconds: 8);
   static const double _minMovementMetersForReminderClock = 1.8;
   static const double _minSpeedMpsForReminderClock = 0.35;
   static const int _minHeadingSamples = 3;
@@ -136,6 +148,8 @@ class VoiceGuidanceService extends ChangeNotifier {
   static const double _progressConfirmationTurnBufferMeters = 8.0;
   static const String _periodicProgressPrefKey =
       'periodic_progress_confirmations_enabled';
+  static const String _landmarksEnabledPrefKey = 'landmarks_enabled';
+  static const String _explorationModePrefKey = 'exploration_mode_enabled';
 
   double _minInstructionDistanceMeters = 12;
 
@@ -151,6 +165,8 @@ class VoiceGuidanceService extends ChangeNotifier {
   RouteResult? get activeRoute => _routingService?.currentRoute;
   bool get periodicProgressConfirmationsEnabled =>
       _periodicProgressConfirmationsEnabled;
+  bool get landmarksEnabled => _landmarksEnabled;
+  bool get explorationModeEnabled => _explorationModeEnabled;
 
   Future<void> _ensurePreferencesLoaded() async {
     if (_preferencesLoaded) return;
@@ -158,10 +174,21 @@ class VoiceGuidanceService extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       _periodicProgressConfirmationsEnabled =
           prefs.getBool(_periodicProgressPrefKey) ?? true;
+      _landmarksEnabled = prefs.getBool(_landmarksEnabledPrefKey) ?? true;
+      _explorationModeEnabled = prefs.getBool(_explorationModePrefKey) ?? false;
+      debugPrint('📌 Preferencias cargadas - Exploración: $_explorationModeEnabled');
     } catch (_) {
       _periodicProgressConfirmationsEnabled = true;
+      _landmarksEnabled = true;
+      _explorationModeEnabled = false;
     }
     _preferencesLoaded = true;
+    notifyListeners();
+    
+    // Iniciar modo exploración si estaba activo
+    if (_explorationModeEnabled && !_isNavigating) {
+      _startExplorationMode();
+    }
   }
 
   Future<void> setPeriodicProgressConfirmationsEnabled(bool enabled) async {
@@ -173,6 +200,120 @@ class VoiceGuidanceService extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_periodicProgressPrefKey, enabled);
     } catch (_) {}
+  }
+
+  void setLandmarksEnabled(bool enabled) {
+    if (_landmarksEnabled == enabled) return;
+    _landmarksEnabled = enabled;
+    if (!enabled) {
+      _lastAnnouncedLandmark = null;
+    }
+    notifyListeners();
+    _saveLandmarksPreference();
+  }
+
+  Future<void> _saveLandmarksPreference() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_landmarksEnabledPrefKey, _landmarksEnabled);
+      debugPrint('💾 Preferencia landmarks guardada: $_landmarksEnabled');
+    } catch (e) {
+      debugPrint('Error guardando preferencia de landmarks: $e');
+    }
+  }
+
+  void setExplorationModeEnabled(bool enabled) async {
+    if (_explorationModeEnabled == enabled) return;
+    _explorationModeEnabled = enabled;
+    notifyListeners();
+    
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_explorationModePrefKey, enabled);
+      debugPrint('💾 Preferencia exploración guardada: $enabled');
+    } catch (_) {}
+    
+    if (enabled && !_isNavigating) {
+      _startExplorationMode();
+    } else if (!enabled) {
+      _stopExplorationMode();
+    }
+  }
+
+  void setLocationService(LocationService service) {
+    _permanentLocationService = service;
+    debugPrint('📍 VoiceGuidance: LocationService permanente asignado');
+  }
+
+  void setGeoJsonService(GeoJsonService service) {
+    _geoJsonServiceRef = service;
+    debugPrint('📍 VoiceGuidance: GeoJsonService permanente asignado');
+  }
+
+  void setAnnouncer(VoiceAnnouncer announcer) {
+    _permanentAnnouncer = announcer;
+    debugPrint('📍 VoiceGuidance: Announcer permanente asignado');
+  }
+
+  void _startExplorationMode() {
+    if (_explorationTimer != null) return;
+    if (_isNavigating) return;
+    
+    _explorationTimer = Timer.periodic(const Duration(seconds: 4), (timer) async {
+      await _checkExplorationLandmarks();
+    });
+    
+    debugPrint('🔍 Modo exploración INICIADO');
+  }
+
+  void _stopExplorationMode() {
+    _explorationTimer?.cancel();
+    _explorationTimer = null;
+    _lastExplorationLandmark = null;
+    debugPrint('🔍 Modo exploración DETENIDO');
+  }
+
+  Future<void> _checkExplorationLandmarks() async {
+    if (!_explorationModeEnabled || _isNavigating) return;
+
+    final location = _permanentLocationService;
+    if (location?.currentLocation == null) return;
+
+    final geoJson = _geoJsonServiceRef;
+    if (geoJson == null || !geoJson.isLoaded) return;
+
+    final loc = location!.currentLocation!;
+    final now = DateTime.now();
+
+    if (now.difference(_lastExplorationLandmarkAt).inSeconds < 8) return;
+
+    final landmark = geoJson.getNearestLandmark(
+      loc.latitude,
+      loc.longitude,
+      maxDistanceMeters: 25,
+    );
+
+    if (landmark != null && landmark != _lastExplorationLandmark) {
+      _lastExplorationLandmark = landmark;
+      _lastExplorationLandmarkAt = now;
+      debugPrint('🔍 EXPLORACIÓN: $landmark');
+      await _speakLandmarkExploration(landmark);
+    }
+  }
+
+  Future<void> _speakLandmarkExploration(String landmark) async {
+    final text = NavigationMessages.passingLandmark(landmark);
+    
+    final accessibilityOn =
+        SemanticsBinding.instance.semanticsEnabled ||
+        WidgetsBinding.instance.platformDispatcher.accessibilityFeatures
+            .accessibleNavigation;
+
+    if (accessibilityOn) {
+      await _permanentAnnouncer?.call(text);
+    } else {
+      await _speakAndAnnounce(text);
+    }
   }
 
   double? get mapReferenceHeadingDegrees {
@@ -200,7 +341,6 @@ class VoiceGuidanceService extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ── HU-18: API pública de lectura de texto ──
   Future<void> speak(String message) async {
     await _initTts();
     await _speakAndAnnounce(message);
@@ -219,8 +359,10 @@ class VoiceGuidanceService extends ChangeNotifier {
         await _tts.setLanguage('es-ES');
       }
       _ttsReady = true;
+      debugPrint('✅ TTS inicializado correctamente');
     } catch (e) {
       _status = 'No se pudo inicializar TTS: $e';
+      debugPrint('❌ Error inicializando TTS: $e');
       notifyListeners();
     }
   }
@@ -231,24 +373,13 @@ class VoiceGuidanceService extends ChangeNotifier {
       if (!_ttsReady) return;
       try {
         await _tts.speak(message);
+        debugPrint('🔊 SPEAK: $message');
       } catch (e) {
         debugPrint('Error al reproducir mensaje TTS: $e');
       }
     });
   }
 
-  // HU-27: corta cualquier TTS en curso sin afectar el estado de la
-  // navegación. Útil para que el tutorial pueda pausarse o cerrarse
-  // limpiamente. Si más adelante hay TTS de navegación reproduciéndose,
-  // este método también lo interrumpirá; por eso debe usarse solo desde
-  // pantallas que no compitan con la guía activa.
-  Future<void> stopSpeaking() async {
-    try {
-      await _tts.stop();
-    } catch (_) {}
-  }
-
-  // ── HU-16: Distancia restante para el chip en NavigationMapScreen ──
   double getRemainingDistance(double currentLat, double currentLng) {
     if (_steps.isEmpty || _currentStepIndex >= _steps.length) return 0;
 
@@ -274,7 +405,6 @@ class VoiceGuidanceService extends ChangeNotifier {
     return total;
   }
 
-  // ── HU-16: Anuncia en voz cuánto falta ──
   Future<void> announceRemainingDistance() async {
     if (!_isNavigating ||
         _isPaused ||
@@ -342,6 +472,12 @@ class VoiceGuidanceService extends ChangeNotifier {
   }) async {
     await _ensurePreferencesLoaded();
     await _initTts();
+    
+    // Detener modo exploración mientras navegamos
+    if (_explorationModeEnabled) {
+      _stopExplorationMode();
+    }
+    
     await stopNavigation(speak: false);
 
     _locationService = locationService;
@@ -353,12 +489,9 @@ class VoiceGuidanceService extends ChangeNotifier {
     _destinationLat = destinationLat;
     _destinationLng = destinationLng;
 
-    // HU-16: resetear landmarks
     _lastAnnouncedLandmark = null;
     _lastLandmarkAt = DateTime.fromMillisecondsSinceEpoch(0);
 
-    // Para la navegación automática de prueba usamos el primer tramo de la ruta
-    // como referencia inicial y evitamos la espera de calibración.
     final double? initialHeadingDegrees = skipInitialCalibration
       ? (_routeLegs.isNotEmpty ? _routeLegs.first.bearingDegrees : null)
       : await _calibrateInitialHeading();
@@ -387,10 +520,8 @@ class VoiceGuidanceService extends ChangeNotifier {
     _locationService?.addListener(_onLocationChanged);
     notifyListeners();
 
-    // HU-17: vibración de inicio
     await HapticService.trigger(HapticEvent.navigationStarted);
 
-    // HU-18: mensaje centralizado
     final accessibilityOn =
         SemanticsBinding.instance.semanticsEnabled ||
         WidgetsBinding.instance.platformDispatcher.accessibilityFeatures
@@ -511,6 +642,11 @@ class VoiceGuidanceService extends ChangeNotifier {
     }
 
     notifyListeners();
+    
+    // Reiniciar modo exploración si estaba activo
+    if (_explorationModeEnabled && !_isNavigating) {
+      _startExplorationMode();
+    }
   }
 
   Future<void> _onLocationChanged() async {
@@ -553,13 +689,10 @@ class VoiceGuidanceService extends ChangeNotifier {
       step.endPoint.longitude,
     );
 
-    // Instrucción de navegación: prioridad máxima
     if (distanceToStep <= step.triggerDistanceMeters) {
       _currentStepIndex++;
 
       if (_currentStepIndex >= _steps.length) {
-        // No anunciar llegada por agotamiento de pasos: solo cuando
-        // realmente estemos dentro del radio del destino.
         _currentStepIndex = _steps.length - 1;
         _currentInstruction =
             'Continúa hasta llegar a $_destinationName. Te avisaré al llegar.';
@@ -574,7 +707,6 @@ class VoiceGuidanceService extends ChangeNotifier {
       _movingReminderElapsed = Duration.zero;
       notifyListeners();
 
-      // HU-17: vibración de giro
       await HapticService.trigger(HapticEvent.turnInstruction);
 
       await _speakAndAnnounce(_currentInstruction);
@@ -582,12 +714,12 @@ class VoiceGuidanceService extends ChangeNotifier {
       return;
     }
 
-    // HU-16: Landmark cercano (solo si no está a punto de girar)
+    // Landmarks durante navegación (solo si el toggle está activado)
     final enoughTimeSinceLandmark =
         now.difference(_lastLandmarkAt) >= _minTimeBetweenLandmarks;
     final notAboutToTurn = distanceToStep > step.triggerDistanceMeters + 10;
 
-    if (enoughTimeSinceLandmark && notAboutToTurn) {
+    if (_landmarksEnabled && enoughTimeSinceLandmark && notAboutToTurn) {
       final landmark = _landmarkResolver?.call(
         current.latitude,
         current.longitude,
@@ -595,13 +727,12 @@ class VoiceGuidanceService extends ChangeNotifier {
       if (landmark != null && landmark != _lastAnnouncedLandmark) {
         _lastAnnouncedLandmark = landmark;
         _lastLandmarkAt = now;
-        // HU-18: mensaje centralizado
-        await _speakAndAnnounce(NavigationMessages.passingLandmark(landmark));
+        debugPrint('🗣️ LANDMARK (navegación): $landmark');
+        await _speakLandmark(NavigationMessages.passingLandmark(landmark));
         return;
       }
     }
 
-    // HU-12: confirmación periódica de progreso
     final shouldConfirmProgress =
         _periodicProgressConfirmationsEnabled &&
         _movingReminderElapsed >= _progressConfirmationInterval &&
@@ -647,9 +778,6 @@ class VoiceGuidanceService extends ChangeNotifier {
       unawaited(onArrival());
     }
 
-    // Intento adicional de fallback háptico: algunos dispositivos/emuladores
-    // pueden no respetar el canal nativo; forzamos un impacto háptico local
-    // como complemento (silencioso si no está disponible).
     try {
       HapticFeedback.heavyImpact();
     } catch (_) {}
@@ -707,8 +835,6 @@ class VoiceGuidanceService extends ChangeNotifier {
   void _syncStepIndexWithProgress(double lat, double lng) {
     if (_steps.isEmpty || _currentStepIndex >= _steps.length) return;
 
-    // Solo avanzar al siguiente paso inmediato, nunca saltar más de uno a la vez.
-    // Esto evita que el usuario "salte" instrucciones por ruido del GPS.
     final nextIdx = _currentStepIndex + 1;
     if (nextIdx >= _steps.length) return;
 
@@ -720,8 +846,6 @@ class VoiceGuidanceService extends ChangeNotifier {
       nextPoint.longitude,
     );
 
-    // Solo avanzar si estamos muy cerca del endPoint del próximo paso (< 12 m)
-    // y más cerca de ese punto que del endPoint del paso actual.
     if (dNext > 12) return;
 
     final currentPoint = _steps[_currentStepIndex].endPoint;
@@ -748,11 +872,8 @@ class VoiceGuidanceService extends ChangeNotifier {
     final routing = _routingService;
     if (routing == null) return;
 
-    // HU-17: vibración de recálculo
     await HapticService.trigger(HapticEvent.routeRecalculated);
 
-    // Anunciar desvío primero — el usuario sabe que algo cambió
-    // mientras la ruta se recalcula en background.
     await _speakAndAnnounce(NavigationMessages.offRoute());
 
     final updated = await routing.buildRoute(
@@ -763,13 +884,11 @@ class VoiceGuidanceService extends ChangeNotifier {
     );
 
     if (updated == null || updated.polyline.length < 2) {
-      // HU-17: vibración de error
       await HapticService.trigger(HapticEvent.error);
       await _speakAndAnnounce(NavigationMessages.rerouteFailed());
       return;
     }
 
-    // Usar el bearing del primer tramo de la nueva ruta como orientación inicial.
     final newInitialHeading = _bearingDegrees(
       updated.polyline[0],
       updated.polyline[1],
@@ -810,17 +929,6 @@ class VoiceGuidanceService extends ChangeNotifier {
     );
   }
 
-  // Calibración inicial de heading: pide caminar unos pasos y girar un poco.
-  //
-  // Estrategia:
-  //   1. Pide al usuario que camine en línea recta unos pasos.
-  //   2. En paralelo escucha el magnetómetro como apoyo y el GPS como base.
-  //   3. En cuanto el GPS detecta >= 2.5 m de desplazamiento, calcula el
-  //      bearing desde el movimiento real — eso es el heading principal.
-  //   4. Si el magnetómetro también tiene muestras consistentes, lo usa solo
-  //      para refinar el valor (promedio ponderado 90% GPS / 10% magnetómetro).
-  //   5. Si después de 12 s no hubo suficiente movimiento, devuelve null
-  //      y la primera instrucción será genérica ("avanza X metros").
   Future<double?> _calibrateInitialHeading() async {
     final loc = _locationService;
     if (loc == null) return null;
@@ -833,7 +941,6 @@ class VoiceGuidanceService extends ChangeNotifier {
     final startPos = loc.currentLocation;
     if (startPos == null) return null;
 
-    // Escuchar magnetómetro en paralelo, pero dar prioridad al desplazamiento GPS.
     final compassSamples = <double>[];
     StreamSubscription<CompassEvent>? compassSub;
     final compassStream = FlutterCompass.events;
@@ -884,7 +991,6 @@ class VoiceGuidanceService extends ChangeNotifier {
 
     final compassHeading = _stableCompassHeading(compassSamples);
 
-    // Si no hubo movimiento suficiente, usar brújula estable como respaldo.
     if (gpsHeading == null) {
       if (compassHeading != null) {
         await _speakAndAnnounce('Orientación lista con brújula.');
@@ -901,13 +1007,11 @@ class VoiceGuidanceService extends ChangeNotifier {
     if (compassHeading != null) {
       final delta = _normalizeAngle(compassHeading - gpsHeading).abs();
 
-      // Si GPS movió poco o hay conflicto fuerte, priorizar brújula estable.
       if (movedMeters < 4.5 || delta >= 70) {
         await _speakAndAnnounce('Orientación lista.');
         return compassHeading;
       }
 
-      // Si ambas fuentes son razonablemente coherentes, combinarlas.
       final gpsRad = _toRad(gpsHeading);
       final compassRad = _toRad(compassHeading);
       final sinMean = 0.8 * sin(gpsRad) + 0.2 * sin(compassRad);
@@ -957,7 +1061,6 @@ class VoiceGuidanceService extends ChangeNotifier {
     return (meanRad * 180.0 / pi + 360) % 360;
   }
 
-  // Johan: reloj de recordatorio basado en movimiento real del usuario
   void _updateMovingReminderClock(LocationData current, DateTime now) {
     final lastAt = _lastReminderSampleAt;
     final lastPoint = _lastReminderSamplePoint;
@@ -1106,26 +1209,35 @@ class VoiceGuidanceService extends ChangeNotifier {
     return legs;
   }
 
+  Future<void> _speakLandmark(String text) async {
+    try {
+      HapticFeedback.lightImpact();
+    } catch (_) {}
+    
+    debugPrint('🔊 REPRODUCIENDO LANDMARK: $text');
+    await _speakAndAnnounce(text);
+  }
+
   Future<void> _speakAndAnnounce(String text) async {
     await _enqueueVoiceTask(() async {
       try {
-        // Primero anunciar para servicios de accesibilidad (TalkBack/VoiceOver)
-        await _announceForTalkBack?.call(text);
-
-        // Comprobar en tiempo real si hay un lector de pantalla activo;
-        // si lo hay, NO reproducimos la TTS de la app para evitar duplicidad.
+        await _initTts();
+        if (!_ttsReady) {
+          debugPrint('❌ TTS no listo para: $text');
+          return;
+        }
+        
+        debugPrint('🔊 SPEAK: $text');
+        await _tts.speak(text);
+        
         final semanticsOn = SemanticsBinding.instance.semanticsEnabled;
         final accessibleNavOn = WidgetsBinding
-          .instance
-          .platformDispatcher
-          .accessibilityFeatures
-          .accessibleNavigation;
-        final accessibilityActive =
-          semanticsOn || accessibleNavOn || _suppressTtsWhenAccessibilityActive;
-        if (accessibilityActive) return;
-
-        if (_ttsReady) {
-          await _tts.speak(text);
+            .instance
+            .platformDispatcher
+            .accessibilityFeatures
+            .accessibleNavigation;
+        if (semanticsOn || accessibleNavOn) {
+          await _announceForTalkBack?.call(text);
         }
       } catch (e) {
         debugPrint('Error de voz: $e');
@@ -1141,8 +1253,6 @@ class VoiceGuidanceService extends ChangeNotifier {
     return _voiceQueue;
   }
 
-  // Permite al UI indicar si hay un lector de pantalla activo y por tanto
-  // debemos evitar reproducir TTS adicional que provoque duplicidad.
   void setSuppressTtsWhenAccessibility(bool suppress) {
     _suppressTtsWhenAccessibilityActive = suppress;
   }
@@ -1187,6 +1297,7 @@ class VoiceGuidanceService extends ChangeNotifier {
 
   @override
   void dispose() {
+    _stopExplorationMode();
     _locationService?.removeListener(_onLocationChanged);
     _tts.stop();
     super.dispose();
