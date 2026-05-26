@@ -8,7 +8,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
-import '../utils/accessibility_scale.dart';
 import 'permission_service.dart';
 
 // ============================================================
@@ -22,7 +21,10 @@ class PermissionScreen extends StatefulWidget {
   // (concedidos o denegados) y la app puede continuar.
   final VoidCallback onPermissionsHandled;
 
-  const PermissionScreen({super.key, required this.onPermissionsHandled});
+  const PermissionScreen({
+    super.key,
+    required this.onPermissionsHandled,
+  });
 
   @override
   State<PermissionScreen> createState() => _PermissionScreenState();
@@ -61,9 +63,10 @@ class _PermissionScreenState extends State<PermissionScreen> {
         'Para usar comandos de voz necesitamos acceso al micrófono. '
         'El botón Conceder permisos se encuentra al centro de la pantalla.',
       );
-      Future.delayed(const Duration(milliseconds: 800), () {
-        if (mounted) _actionButtonFocus.requestFocus();
-      });
+      Future.delayed(
+        const Duration(milliseconds: 800),
+        () { if (mounted) _actionButtonFocus.requestFocus(); },
+      );
     });
   }
 
@@ -106,7 +109,9 @@ class _PermissionScreenState extends State<PermissionScreen> {
       'Aparecerá un cuadro de diálogo del sistema.',
     );
 
-    final micResult = await PermissionService.request(AppPermission.microphone);
+    final micResult = await PermissionService.request(
+      AppPermission.microphone,
+    );
 
     if (!mounted) return;
     setState(() {
@@ -121,13 +126,14 @@ class _PermissionScreenState extends State<PermissionScreen> {
     await Future.delayed(const Duration(milliseconds: 1500));
 
     // ── 3. Resumen final accesible ──
-    final bool allGranted = locationResult.isGranted && micResult.isGranted;
+    final bool allGranted =
+        locationResult.isGranted && micResult.isGranted;
 
     _announce(
       allGranted
           ? 'Todos los permisos concedidos. La aplicación está lista.'
           : 'Permisos procesados con limitaciones. '
-                'Puedes continuar usando las funciones disponibles.',
+            'Puedes continuar usando las funciones disponibles.',
     );
 
     HapticFeedback.heavyImpact();
@@ -147,99 +153,78 @@ class _PermissionScreenState extends State<PermissionScreen> {
       child: Scaffold(
         backgroundColor: const Color(0xFF0D1B2A),
         body: SafeArea(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final isCompactHeight = constraints.maxHeight < 640;
-              return SingleChildScrollView(
-                physics: const ClampingScrollPhysics(),
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(minHeight: constraints.maxHeight),
-                  child: IntrinsicHeight(
-                    child: Padding(
-                      padding: responsiveInsets(
-                        context,
-                        horizontal: isCompactHeight ? 18 : 24,
-                        vertical: isCompactHeight ? 18 : 32,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          // ── Encabezado ──
-                          Semantics(
-                            header: true,
-                            label: 'Permisos de la aplicación',
-                            child: ExcludeSemantics(
-                              child: Column(
-                                children: [
-                                  const Icon(
-                                    Icons.security_rounded,
-                                    size: 56,
-                                    color: Color(0xFF82B1FF),
-                                  ),
-                                  const SizedBox(height: 12),
-                                  Text(
-                                    'Permisos necesarios',
-                                    textScaler: clampedTextScaler(
-                                      context,
-                                      maxScale: 1.3,
-                                    ),
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.displaySmall,
-                                    textAlign: TextAlign.center,
-                                    softWrap: true,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-
-                          SizedBox(height: responsiveSpace(context, 24)),
-
-                          // ── Tarjetas de permiso ──
-                          Semantics(
-                            container: true,
-                            sortKey: const OrdinalSortKey(1),
-                            label: 'Lista de permisos. Dos elementos.',
-                            child: Column(
-                              children: [
-                                _PermissionCard(
-                                  icon: Icons.location_on_rounded,
-                                  title: 'Ubicación',
-                                  reason:
-                                      'Para guiarte por los caminos y edificios del campus '
-                                      'con instrucciones precisas de a dónde girar.',
-                                  result: _locationResult,
-                                ),
-                                SizedBox(height: responsiveSpace(context, 16)),
-                                _PermissionCard(
-                                  icon: Icons.mic_rounded,
-                                  title: 'Micrófono',
-                                  reason:
-                                      'Para que puedas decir tu destino con tu voz '
-                                      'en lugar de escribirlo.',
-                                  result: _micResult,
-                                ),
-                              ],
-                            ),
-                          ),
-
-                          const Spacer(),
-
-                          // ── Botón de acción principal (cambia según el estado) ──
-                          if (_flowState == _FlowState.explaining ||
-                              _flowState == _FlowState.requesting)
-                            _buildRequestButton(),
-
-                          if (_flowState == _FlowState.done)
-                            _buildContinueButton(),
-                        ],
-                      ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 24.0,
+              vertical: 32.0,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // ── Encabezado ──
+                Semantics(
+                  header: true,
+                  label: 'Permisos de la aplicación',
+                  child: ExcludeSemantics(
+                    child: Column(
+                      children: [
+                        const Icon(
+                          Icons.security_rounded,
+                          size: 56,
+                          color: Color(0xFF82B1FF),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Permisos necesarios',
+                          style: Theme.of(context).textTheme.displaySmall,
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
                     ),
                   ),
                 ),
-              );
-            },
+
+                const SizedBox(height: 24),
+
+                // ── Tarjetas de permiso ──
+                Semantics(
+                  container: true,
+                  sortKey: const OrdinalSortKey(1),
+                  label: 'Lista de permisos. Dos elementos.',
+                  child: Column(
+                    children: [
+                      _PermissionCard(
+                        icon: Icons.location_on_rounded,
+                        title: 'Ubicación',
+                        reason:
+                            'Para guiarte por los caminos y edificios del campus '
+                            'con instrucciones precisas de a dónde girar.',
+                        result: _locationResult,
+                      ),
+                      const SizedBox(height: 16),
+                      _PermissionCard(
+                        icon: Icons.mic_rounded,
+                        title: 'Micrófono',
+                        reason:
+                            'Para que puedas decir tu destino con tu voz '
+                            'en lugar de escribirlo.',
+                        result: _micResult,
+                      ),
+                    ],
+                  ),
+                ),
+
+                const Spacer(),
+
+                // ── Botón de acción principal (cambia según el estado) ──
+                if (_flowState == _FlowState.explaining ||
+                    _flowState == _FlowState.requesting)
+                  _buildRequestButton(),
+
+                if (_flowState == _FlowState.done)
+                  _buildContinueButton(),
+              ],
+            ),
           ),
         ),
       ),
@@ -247,7 +232,6 @@ class _PermissionScreenState extends State<PermissionScreen> {
   }
 
   Widget _buildRequestButton() {
-    final textScaler = clampedTextScaler(context);
     return FocusTraversalOrder(
       order: const NumericFocusOrder(1),
       child: Semantics(
@@ -267,12 +251,8 @@ class _PermissionScreenState extends State<PermissionScreen> {
           style: ElevatedButton.styleFrom(
             backgroundColor: const Color(0xFF1565C0),
             foregroundColor: Colors.white,
-            disabledBackgroundColor: const Color(
-              0xFF1565C0,
-            ).withValues(alpha: 0.5),
-            padding: EdgeInsets.symmetric(
-              vertical: responsiveSpace(context, 20),
-            ),
+            disabledBackgroundColor: const Color(0xFF1565C0).withValues(alpha: 0.5),
+            padding: const EdgeInsets.symmetric(vertical: 24),
             minimumSize: const Size(double.infinity, 80),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
@@ -284,10 +264,10 @@ class _PermissionScreenState extends State<PermissionScreen> {
           ),
           child: ExcludeSemantics(
             child: _isProcessing
-                ? Row(
+                ? const Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const SizedBox(
+                      SizedBox(
                         width: 24,
                         height: 24,
                         child: CircularProgressIndicator(
@@ -295,29 +275,16 @@ class _PermissionScreenState extends State<PermissionScreen> {
                           strokeWidth: 2.5,
                         ),
                       ),
-                      const SizedBox(width: 16),
-                      Flexible(
-                        child: FittedBox(
-                          fit: BoxFit.scaleDown,
-                          child: Text('Solicitando...', textScaler: textScaler),
-                        ),
-                      ),
+                      SizedBox(width: 16),
+                      Text('Solicitando...'),
                     ],
                   )
-                : Row(
+                : const Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(Icons.check_circle_outline_rounded, size: 28),
-                      const SizedBox(width: 12),
-                      Flexible(
-                        child: FittedBox(
-                          fit: BoxFit.scaleDown,
-                          child: Text(
-                            'Conceder permisos',
-                            textScaler: textScaler,
-                          ),
-                        ),
-                      ),
+                      Icon(Icons.check_circle_outline_rounded, size: 28),
+                      SizedBox(width: 12),
+                      Text('Conceder permisos'),
                     ],
                   ),
           ),
@@ -330,7 +297,6 @@ class _PermissionScreenState extends State<PermissionScreen> {
     final bool allGranted =
         (_locationResult?.isGranted ?? false) &&
         (_micResult?.isGranted ?? false);
-    final textScaler = clampedTextScaler(context);
 
     return FocusTraversalOrder(
       order: const NumericFocusOrder(1),
@@ -341,7 +307,7 @@ class _PermissionScreenState extends State<PermissionScreen> {
         label: allGranted
             ? 'Continuar a navegación. Todos los permisos están activos.'
             : 'Continuar con funciones limitadas. '
-                  'Algunos permisos no fueron concedidos.',
+              'Algunos permisos no fueron concedidos.',
         hint: 'Toca dos veces para ir a la pantalla de navegación.',
         onTap: _continueToNavigation,
         child: ElevatedButton(
@@ -352,9 +318,7 @@ class _PermissionScreenState extends State<PermissionScreen> {
                 ? const Color(0xFF2E7D32)
                 : const Color(0xFFE65100),
             foregroundColor: Colors.white,
-            padding: EdgeInsets.symmetric(
-              vertical: responsiveSpace(context, 20),
-            ),
+            padding: const EdgeInsets.symmetric(vertical: 24),
             minimumSize: const Size(double.infinity, 80),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
@@ -375,16 +339,8 @@ class _PermissionScreenState extends State<PermissionScreen> {
                   size: 28,
                 ),
                 const SizedBox(width: 12),
-                Flexible(
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      allGranted
-                          ? 'Iniciar navegación'
-                          : 'Continuar (limitado)',
-                      textScaler: textScaler,
-                    ),
-                  ),
+                Text(
+                  allGranted ? 'Iniciar navegación' : 'Continuar (limitado)',
                 ),
               ],
             ),
@@ -419,7 +375,6 @@ class _PermissionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textScaler = clampedTextScaler(context);
     // Construir el label semántico completo según el estado
     final String semanticLabel = _buildSemanticLabel();
 
@@ -429,21 +384,20 @@ class _PermissionCard extends StatelessWidget {
       // Las tarjetas no son botones, solo información de estado
       child: ExcludeSemantics(
         child: Container(
-          padding: EdgeInsets.all(responsiveSpace(context, 18)),
+          padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
             color: const Color(0xFF1A2A3A),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: _borderColor(), width: 1.5),
+            border: Border.all(
+              color: _borderColor(),
+              width: 1.5,
+            ),
           ),
           child: Row(
             children: [
               // Ícono del permiso
-              Icon(
-                icon,
-                size: responsiveSpace(context, 36),
-                color: const Color(0xFF82B1FF),
-              ),
-              SizedBox(width: responsiveSpace(context, 16)),
+              Icon(icon, size: 36, color: const Color(0xFF82B1FF)),
+              const SizedBox(width: 16),
               // Texto
               Expanded(
                 child: Column(
@@ -451,9 +405,6 @@ class _PermissionCard extends StatelessWidget {
                   children: [
                     Text(
                       title,
-                      textScaler: textScaler,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 18,
@@ -463,8 +414,6 @@ class _PermissionCard extends StatelessWidget {
                     const SizedBox(height: 4),
                     Text(
                       reason,
-                      textScaler: textScaler,
-                      softWrap: true,
                       style: const TextStyle(
                         color: Colors.white60,
                         fontSize: 14,
@@ -523,7 +472,6 @@ class _StatusChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textScaler = clampedTextScaler(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
@@ -533,9 +481,6 @@ class _StatusChip extends StatelessWidget {
       ),
       child: Text(
         _label(),
-        textScaler: textScaler,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
         style: TextStyle(
           color: _color(),
           fontSize: 13,

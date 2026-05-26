@@ -1,8 +1,6 @@
-import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
-
+import 'package:flutter/material.dart';
 import '../models/campus_place.dart';
-import '../utils/accessibility_scale.dart';
 
 class PlaceDetailScreen extends StatefulWidget {
   final CampusPlace place;
@@ -56,84 +54,54 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
   Widget build(BuildContext context) {
     final key = sections[_sectionIndex];
     final value = info[key];
-    final textScaler = clampedTextScaler(context);
-    final titleScaler = clampedTextScaler(context, maxScale: 1.3);
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          widget.place.name,
-          textScaler: titleScaler,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
+        title: Text(widget.place.name),
       ),
-      body: SafeArea(
-        child: Padding(
-          padding: responsiveInsets(context, horizontal: 16, vertical: 16),
-          child: Column(
-            children: [
-              Expanded(
-                child: Semantics(
-                  label: 'Seccion $key',
-                  child: SingleChildScrollView(
-                    physics: const ClampingScrollPhysics(),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          key.toUpperCase(),
-                          textScaler: titleScaler,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        SizedBox(height: responsiveSpace(context, 10)),
-                        Text(
-                          value is List ? value.join('\n') : value.toString(),
-                          textScaler: textScaler,
-                          softWrap: true,
-                          style: const TextStyle(fontSize: 16),
-                        ),
-                      ],
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            // Sección actual
+            Expanded(
+              child: Semantics(
+                label: 'Sección $key',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      key.toUpperCase(),
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 10),
+                    Text(
+                      value is List ? value.join('\n') : value.toString(),
+                      style: const TextStyle(fontSize: 16),
+                    ),
+                  ],
                 ),
               ),
-              Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: _prevSection,
-                      style: ElevatedButton.styleFrom(
-                        minimumSize: const Size(48, 48),
-                      ),
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text('Anterior', textScaler: textScaler),
-                      ),
-                    ),
-                  ),
-                  SizedBox(width: responsiveSpace(context, 12)),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: _nextSection,
-                      style: ElevatedButton.styleFrom(
-                        minimumSize: const Size(48, 48),
-                      ),
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text('Siguiente', textScaler: textScaler),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
+            ),
+
+            // Navegación
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                ElevatedButton(
+                  onPressed: _prevSection,
+                  child: const Text('Anterior'),
+                ),
+                ElevatedButton(
+                  onPressed: _nextSection,
+                  child: const Text('Siguiente'),
+                ),
+              ],
+            )
+          ],
         ),
       ),
     );

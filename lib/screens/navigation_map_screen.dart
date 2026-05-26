@@ -12,7 +12,6 @@ import '../services/location_service.dart';
 import '../services/route_guidance_builder.dart';
 import '../services/routing_service.dart';
 import '../services/voice_guidance_service.dart';
-import '../utils/accessibility_scale.dart';
 import '../services/haptic_service.dart';
 
 class NavigationMapScreen extends StatefulWidget {
@@ -54,9 +53,6 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
   bool _isLoading = true;
   bool _hasError = false;
   bool _voiceStarted = false;
-  bool _isNavigationPaused = false;
-  bool _isResumingNavigation = false;
-  String? _navigationLiveMessage;
   bool _usageInstructionsShown = false;
   bool _routeSimulationRunning = false;
   bool _autoSimulationScheduled = false;
@@ -98,68 +94,6 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
   Future<void> _announceAndSpeak(String message) async {
     await _announce(message);
     await _voiceService?.speakMessage(message);
-  }
-
-  Future<void> _openGuidanceSettings() async {
-    final voice = _voiceService;
-    if (voice == null) return;
-
-    var periodicEnabled = voice.periodicProgressConfirmationsEnabled;
-
-    await showDialog<void>(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              backgroundColor: const Color(0xFF12263A),
-              title: const Text(
-                'Configuración de guía',
-                style: TextStyle(color: Colors.white),
-              ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  SwitchListTile(
-                    value: periodicEnabled,
-                    onChanged: (enabled) async {
-                      setDialogState(() => periodicEnabled = enabled);
-                      await voice.setPeriodicProgressConfirmationsEnabled(
-                        enabled,
-                      );
-                      if (!mounted) return;
-                      final message = enabled
-                          ? 'Confirmaciones periódicas de progreso activadas.'
-                          : 'Confirmaciones periódicas de progreso desactivadas.';
-                      await _announceAndSpeak(message);
-                    },
-                    title: const Text(
-                      'Confirmaciones periódicas',
-                      style: TextStyle(color: Colors.white),
-                    ),
-                    subtitle: const Text(
-                      'Recibe mensajes automáticos de avance durante la ruta.',
-                      style: TextStyle(color: Colors.white70),
-                    ),
-                    activeColor: const Color(0xFF82B1FF),
-                    contentPadding: EdgeInsets.zero,
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text(
-                    'Cerrar',
-                    style: TextStyle(color: Color(0xFF82B1FF)),
-                  ),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
   }
 
   void _syncVoiceGuidanceState() {
@@ -263,28 +197,6 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
   String _formatDistance(double meters) {
     if (meters >= 1000) return '${(meters / 1000).toStringAsFixed(1)} km';
     return '${meters.round()} m';
-  }
-
-  String _formatAccuracy(double? accuracyMeters) {
-    if (accuracyMeters == null || !accuracyMeters.isFinite) return '--';
-    return '±${accuracyMeters.round()} m';
-  }
-
-  int _nextStepIndex(LatLng current) {
-    if (_routeSteps.isEmpty) return 0;
-
-    for (var i = 0; i < _routeSteps.length; i++) {
-      final step = _routeSteps[i];
-      final d = _distanceMeters(
-        current.latitude,
-        current.longitude,
-        step.endPoint.latitude,
-        step.endPoint.longitude,
-      );
-      if (d > 10) return i;
-    }
-
-    return _routeSteps.length - 1;
   }
 
   String _normalizeText(String text) {
@@ -610,7 +522,7 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     if (_routeSimulationRunning) {
       await _stopRouteSimulation();
     }
-    await _finishNavigation();
+    await _cancelNavigation();
   }
 
   Future<void> _loadLocalRoute({required LatLng origin}) async {
@@ -650,10 +562,9 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     }
   }
 
-  Future<RouteResult?> _recalculateLocalRoute({
+  Future<void> _recalculateLocalRoute({
     required LatLng newOrigin,
     bool force = false,
-    bool announceReroute = true,
   }) async {
     final now = DateTime.now();
     final enoughTime =
@@ -669,15 +580,15 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     final offRouteDistance = _distanceToRouteMeters(newOrigin, _routePoints);
     final isOffRoute = offRouteDistance > _maxDistanceFromRouteMeters;
 
-    if (!force && !enoughTime) return _activeRoute;
+    if (!force && !enoughTime) return;
     if (!force &&
         !(isOffRoute ||
             movedSinceLastOrigin >= _minMoveToOptionalRerouteMeters)) {
-      return _activeRoute;
+      return;
     }
 
     final routing = _routingService;
-    if (routing == null) return null;
+    if (routing == null) return;
 
     _lastRouteOrigin = newOrigin;
     _lastRouteUpdate = now;
@@ -699,31 +610,26 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
       destinationPolygon: widget.destinationPolygon,
     );
 
-    if (!mounted) return null;
+    if (!mounted) return;
     if (updated == null) {
       setState(() {
         _hasError = true;
         _isLoading = false;
       });
-      return null;
+      return;
     }
 
     _applyLocalRoute(updated);
 
-    if (announceReroute &&
-        now.difference(_lastAnnouncedReroute) >= _minTimeBetweenAnnouncements) {
+    if (now.difference(_lastAnnouncedReroute) >= _minTimeBetweenAnnouncements) {
       _lastAnnouncedReroute = now;
       _announce('Ruta local recalculada por cambio de ubicación.');
     }
-
-    return updated;
   }
 
   void _onLocationChanged() {
     final here = _locationService?.currentLocation;
     if (here == null) return;
-    if (_isNavigationPaused) return;
-
     final next = LatLng(here.latitude, here.longitude);
 
     if (!mounted) return;
@@ -937,7 +843,7 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     }
 
     final here = _locationService?.currentLocation;
-    if (here != null && !_isNavigationPaused) {
+    if (here != null) {
       _currentUser = LatLng(here.latitude, here.longitude);
       _lastRouteOrigin = _currentUser;
     }
@@ -950,237 +856,27 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     super.dispose();
   }
 
-  void _setNavigationLiveMessage(String message) {
-    if (!mounted) return;
-    setState(() {
-      _navigationLiveMessage = message;
-    });
-  }
-
-  Future<void> _pauseNavigation() async {
-    if (_isNavigationPaused) return;
-
-    HapticFeedback.mediumImpact();
-    setState(() {
-      _isNavigationPaused = true;
-      _isLoading = false;
-      _navigationLiveMessage = NavigationMessages.navigationPaused();
-    });
-
-    await _voiceService?.pauseNavigation(speak: false);
-    await _announceAndSpeak(NavigationMessages.navigationPaused());
-  }
-
-  Future<void> _resumeNavigation() async {
-    if (!_isNavigationPaused || _isResumingNavigation) return;
-
-    final here = _locationService?.currentLocation;
-    final origin = here == null
-        ? _currentUser
-        : LatLng(here.latitude, here.longitude);
-
-    HapticFeedback.mediumImpact();
-    setState(() {
-      _isResumingNavigation = true;
-      _isLoading = true;
-      _hasError = false;
-      _currentUser = origin;
-    });
-
-    final resumedRoute = await _recalculateLocalRoute(
-      newOrigin: origin,
-      force: true,
-      announceReroute: false,
-    );
-
-    if (!mounted) return;
-    if (resumedRoute == null) {
-      setState(() {
-        _isResumingNavigation = false;
-        _isLoading = false;
-        _hasError = true;
-      });
-      await _announceAndSpeak('No se pudo reanudar la navegación.');
-      return;
-    }
-
-    final voice = _voiceService;
-    if (voice != null && voice.isNavigating) {
-      await voice.resumeNavigation(route: resumedRoute, speak: false);
-    } else {
-      _voiceStarted = false;
-      await _startVoiceGuidanceIfNeeded();
-    }
-    if (!mounted) return;
-
-    setState(() {
-      _isNavigationPaused = false;
-      _isResumingNavigation = false;
-      _isLoading = false;
-      _navigationLiveMessage = NavigationMessages.navigationResumed();
-    });
-
-    final currentInstruction = _voiceService?.currentInstruction ?? '';
-    final message = currentInstruction.isEmpty
-        ? NavigationMessages.navigationResumed()
-        : '${NavigationMessages.navigationResumed()}. $currentInstruction';
-    await _announceAndSpeak(message);
-  }
-
-  Future<void> _finishNavigation() async {
+  Future<void> _cancelNavigation() async {
     HapticFeedback.heavyImpact();
-    _setNavigationLiveMessage(NavigationMessages.navigationFinished());
-
     final voice = _voiceService;
-    await _announceAndSpeak(NavigationMessages.navigationFinished());
-    await voice?.finishNavigation(speak: false);
-    _routingService?.clearCurrentRoute();
-
+    if (voice != null) {
+      await voice.stopNavigation();
+    }
     if (!mounted) return;
-    setState(() {
-      _isNavigationPaused = false;
-      _isResumingNavigation = false;
-      _voiceStarted = false;
-      _activeRoute = null;
-      _routePoints = [];
-      _routeSteps = [];
-      _routeDistanceMeters = null;
-      _remainingDistanceMeters = null;
-      _waitingExitPlaceName = null;
-      _waitingExitPolygon = null;
-      _waitingExitOutsideSamples = 0;
-    });
-
     Navigator.of(context).pop();
-  }
-
-  Widget _buildNavigationLiveRegion(TextScaler textScaler) {
-    final message = _navigationLiveMessage;
-    if (message == null) return const SizedBox.shrink();
-
-    return Semantics(
-      container: true,
-      liveRegion: true,
-      label: message,
-      child: ExcludeSemantics(
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: _isNavigationPaused
-                ? const Color(0xFF5D4037).withValues(alpha: 0.50)
-                : const Color(0xFF1B5E20).withValues(alpha: 0.42),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.white24),
-          ),
-          child: Text(
-            message,
-            textScaler: textScaler,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w700,
-              fontSize: 13,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRouteControlButton({
-    required String label,
-    required String semanticsLabel,
-    required String hint,
-    required IconData icon,
-    required VoidCallback? onPressed,
-    Color color = const Color(0xFF82B1FF),
-  }) {
-    return Semantics(
-      button: true,
-      enabled: onPressed != null,
-      label: semanticsLabel,
-      hint: hint,
-      onTap: onPressed,
-      child: ExcludeSemantics(
-        child: OutlinedButton.icon(
-          onPressed: onPressed,
-          icon: Icon(icon, size: 18),
-          label: FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(label, maxLines: 1),
-          ),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: color,
-            disabledForegroundColor: Colors.white38,
-            side: BorderSide(color: onPressed == null ? Colors.white24 : color),
-            minimumSize: const Size(0, 48),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-            textStyle: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildNavigationControls() {
-    return Row(
-      children: [
-        Expanded(
-          child: _buildRouteControlButton(
-            label: 'Pausar',
-            semanticsLabel: 'Pausar navegación',
-            hint: 'Detiene temporalmente las instrucciones de guía.',
-            icon: Icons.pause_circle_filled_rounded,
-            onPressed: _isNavigationPaused || _isResumingNavigation
-                ? null
-                : _pauseNavigation,
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: _buildRouteControlButton(
-            label: 'Reanudar',
-            semanticsLabel: 'Reanudar navegación',
-            hint: 'Continúa la ruta desde tu ubicación actual.',
-            icon: Icons.play_circle_fill_rounded,
-            onPressed: !_isNavigationPaused || _isResumingNavigation
-                ? null
-                : _resumeNavigation,
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: _buildRouteControlButton(
-            label: 'Finalizar',
-            semanticsLabel: 'Finalizar navegación',
-            hint: 'Cancela la ruta activa y vuelve a la pantalla principal.',
-            icon: Icons.stop_circle_rounded,
-            color: const Color(0xFFFF8A80),
-            onPressed: _finishNavigation,
-          ),
-        ),
-      ],
-    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final textScaler = clampedTextScaler(context);
-    final titleScaler = clampedTextScaler(context, maxScale: 1.3);
-    final textScale = clampScaleFactor(context, maxScale: 1.5);
     final geo = Provider.of<GeoJsonService>(context, listen: false);
     final polygons = _buildCampusPolygons(geo);
     final polygonLabels = _buildPolygonLabels(geo);
-    final selectedLabel = widget.highlightCategoryId == null
-        ? null
-        : geo.categoryById(widget.highlightCategoryId!)?.label;
-    final nextIndex = _nextStepIndex(_currentUser);
-    final nextSteps = _routeSteps.skip(nextIndex).take(3).toList();
+    final voice = _voiceService;
+    final currentInstruction = voice != null && voice.currentInstruction.isNotEmpty
+      ? voice.currentInstruction
+      : (_routeSteps.isNotEmpty
+        ? _routeSteps.first.instruction
+        : 'Sin indicaciones disponibles todavía.');
     final waitingExitText = _waitingExitPlaceName == null
         ? 'Estás dentro de un área. Sal para iniciar la navegación.'
         : 'Estás dentro de ${_normalizeText(_waitingExitPlaceName!)}. Sal para iniciar la navegación.';
@@ -1234,7 +930,7 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
 
     return WillPopScope(
       onWillPop: () async {
-        await _finishNavigation();
+        await _cancelNavigation();
         return false;
       },
       child: Scaffold(
@@ -1242,7 +938,8 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
         body: Semantics(
           container: true,
           label: 'Pantalla de navegación activa',
-          hint: 'Toca dos veces para repetir la instrucción actual. Mantén presionado para cancelar la navegación.',
+          hint:
+              'Toca dos veces para repetir la instrucción actual. Mantén presionado para cancelar la navegación.',
           onTapHint: 'Repetir instrucción',
           onLongPressHint: 'Cancelar navegación',
           onTap: _repeatCurrentGuidanceFromGesture,
@@ -1253,7 +950,7 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
             onLongPress: _finishNavigationFromLongPress,
             child: LayoutBuilder(
               builder: (context, constraints) {
-                final mapHeight = constraints.maxHeight * (textScale > 1.3 ? 0.28 : 1 / 3);
+                final mapHeight = constraints.maxHeight / 3;
                 final topHeight = constraints.maxHeight - mapHeight;
 
             return Stack(
@@ -1264,318 +961,48 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                       height: topHeight,
                       child: SafeArea(
                         child: Padding(
-                          padding: EdgeInsets.fromLTRB(
-                            responsiveSpace(context, 12),
-                            responsiveSpace(context, 8),
-                            responsiveSpace(context, 12),
-                            responsiveSpace(context, 8),
-                          ),
+                          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              // Fila: botón finalizar + nombre destino
-                              Row(
-                                children: [
-                                  Semantics(
-                                    button: true,
-                                    label: 'Finalizar navegación',
-                                    child: Material(
-                                      color: const Color(0xCC1A237E),
-                                      borderRadius: BorderRadius.circular(12),
-                                      child: IconButton(
-                                        constraints: const BoxConstraints(
-                                          minWidth: 48,
-                                          minHeight: 48,
-                                        ),
-                                        onPressed: _finishNavigation,
-                                        icon: const Icon(
-                                          Icons.stop_circle_rounded,
-                                          color: Colors.white,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 12,
-                                        vertical: 10,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xCC0D1B2A),
-                                        borderRadius: BorderRadius.circular(12),
-                                        border: Border.all(
-                                          color: Colors.white24,
-                                        ),
-                                      ),
-                                      child: Text(
-                                        _normalizeText(widget.destinationName),
-                                        textScaler: titleScaler,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Semantics(
-                                    button: true,
-                                    label: 'Configuración de guía',
-                                    child: Material(
-                                      color: const Color(0xCC1A237E),
-                                      borderRadius: BorderRadius.circular(12),
-                                      child: IconButton(
-                                        constraints: const BoxConstraints(
-                                          minWidth: 48,
-                                          minHeight: 48,
-                                        ),
-                                        onPressed: _openGuidanceSettings,
-                                        icon: const Icon(
-                                          Icons.tune_rounded,
-                                          color: Colors.white,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-
-                              // Filtro de categoría (si aplica)
-                              if (selectedLabel != null) ...[
-                                const SizedBox(height: 10),
-                                Align(
-                                  alignment: Alignment.centerLeft,
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                      vertical: 6,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xCC0D1B2A),
-                                      borderRadius: BorderRadius.circular(10),
-                                      border: Border.all(color: Colors.white24),
-                                    ),
-                                    child: Text(
-                                      'Filtro: ${_normalizeText(selectedLabel)}',
-                                      textScaler: textScaler,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        color: Colors.white70,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                  ),
+                              Text(
+                                _normalizeText(widget.destinationName),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w700,
                                 ),
-                              ],
+                              ),
                               const SizedBox(height: 10),
-
-                              // Panel principal de métricas e indicaciones
-                              Expanded(
-                                child: Container(
-                                  padding: const EdgeInsets.all(16),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xD90D1B2A),
-                                    borderRadius: BorderRadius.circular(18),
-                                    border: Border.all(color: Colors.white24),
-                                  ),
-                                  child: SingleChildScrollView(
-                                    physics: const ClampingScrollPhysics(),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        _buildNavigationLiveRegion(textScaler),
-                                        if (_navigationLiveMessage != null)
-                                          const SizedBox(height: 10),
-                                        _buildNavigationControls(),
-                                        const SizedBox(height: 12),
-
-                                        // Chips de métricas
-                                        Row(
-                                          children: [
-                                            // HU-16: chip de distancia restante
-                                            Expanded(
-                                              child: Semantics(
-                                                label:
-                                                    _remainingDistanceMeters ==
-                                                        null
-                                                    ? 'Distancia restante no disponible'
-                                                    : 'Distancia restante: ${_formatDistance(_remainingDistanceMeters!)}',
-                                                child: _MetricChip(
-                                                  icon:
-                                                      Icons.straighten_rounded,
-                                                  label: 'Distancia restante',
-                                                  value:
-                                                      _remainingDistanceMeters ==
-                                                          null
-                                                      ? '--'
-                                                      : _formatDistance(
-                                                          _remainingDistanceMeters!,
-                                                        ),
-                                                ),
-                                              ),
-                                            ),
-                                            const SizedBox(width: 10),
-                                            Expanded(
-                                              child: _MetricChip(
-                                                icon: Icons.gps_fixed_rounded,
-                                                label: 'Error GPS',
-                                                value: _formatAccuracy(
-                                                  _locationService
-                                                      ?.currentLocation
-                                                      ?.accuracy,
-                                                ),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-
-                                        const SizedBox(height: 10),
-
-                                        // HU-16: botón "¿Cuánto falta?"
-                                        Semantics(
-                                          button: true,
-                                          enabled:
-                                              !_isNavigationPaused &&
-                                              !_isResumingNavigation,
-                                          label: _isNavigationPaused
-                                              ? 'Escuchar distancia restante no disponible mientras la navegación está pausada'
-                                              : 'Escuchar distancia restante',
-                                          hint: _isNavigationPaused
-                                              ? 'Reanuda la navegación para escuchar la distancia restante.'
-                                              : 'Toca dos veces para escuchar cuánto falta para llegar',
-                                          child: SizedBox(
-                                            width: double.infinity,
-                                            child: OutlinedButton.icon(
-                                              onPressed:
-                                                  _isNavigationPaused ||
-                                                      _isResumingNavigation
-                                                  ? null
-                                                  : () => _voiceService
-                                                        ?.announceRemainingDistance(),
-                                              icon: const Icon(
-                                                Icons.record_voice_over_rounded,
-                                                size: 18,
-                                              ),
-                                              label: FittedBox(
-                                                fit: BoxFit.scaleDown,
-                                                child: Text(
-                                                  '¿Cuánto falta?',
-                                                  textScaler: textScaler,
-                                                ),
-                                              ),
-                                              style: OutlinedButton.styleFrom(
-                                                foregroundColor: Colors.white,
-                                                side: const BorderSide(
-                                                  color: Color(0xFF82B1FF),
-                                                ),
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                      vertical: 10,
-                                                    ),
-                                                minimumSize: const Size(
-                                                  double.infinity,
-                                                  48,
-                                                ),
-                                                textStyle: const TextStyle(
-                                                  fontSize: 13,
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-
-                                        const SizedBox(height: 14),
-
-                                        Text(
-                                          'Próximas indicaciones',
-                                          textScaler: textScaler,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: TextStyle(
-                                            color: Colors.white,
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 8),
-                                        if (nextSteps.isEmpty)
-                                          Align(
-                                            alignment: Alignment.topLeft,
-                                            child: Text(
-                                              _waitingExitPolygon != null
-                                                  ? waitingExitText
-                                                  : 'Sin indicaciones disponibles todavía.',
-                                              textScaler: textScaler,
-                                              softWrap: true,
-                                              style: const TextStyle(
-                                                color: Colors.white60,
-                                              ),
-                                            ),
-                                          )
-                                        else
-                                          ListView.separated(
-                                            shrinkWrap: true,
-                                            physics:
-                                                const NeverScrollableScrollPhysics(),
-                                            itemCount: nextSteps.length,
-                                            separatorBuilder: (_, __) =>
-                                                const SizedBox(height: 8),
-                                            itemBuilder: (context, i) {
-                                              return Row(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.start,
-                                                children: [
-                                                  Container(
-                                                    width: 22,
-                                                    height: 22,
-                                                    alignment: Alignment.center,
-                                                    decoration: BoxDecoration(
-                                                      color: const Color(
-                                                        0xFF1565C0,
-                                                      ),
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                            11,
-                                                          ),
-                                                    ),
-                                                    child: Text(
-                                                      '${i + 1}',
-                                                      textScaler: textScaler,
-                                                      style: const TextStyle(
-                                                        color: Colors.white,
-                                                        fontSize: 12,
-                                                        fontWeight:
-                                                            FontWeight.bold,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                  const SizedBox(width: 10),
-                                                  Expanded(
-                                                    child: Text(
-                                                      _normalizeText(
-                                                        nextSteps[i]
-                                                            .instruction,
-                                                      ),
-                                                      textScaler: textScaler,
-                                                      softWrap: true,
-                                                      style: const TextStyle(
-                                                        color: Colors.white70,
-                                                        height: 1.3,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ],
-                                              );
-                                            },
-                                          ),
-                                      ],
-                                    ),
-                                  ),
+                              Text(
+                                _waitingExitPolygon != null
+                                    ? waitingExitText
+                                    : _normalizeText(currentInstruction),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.w700,
+                                  height: 1.2,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                _remainingDistanceMeters == null
+                                    ? 'Distancia restante no disponible.'
+                                    : 'Distancia restante: ${_formatDistance(_remainingDistanceMeters!)}.',
+                                style: const TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Toca una vez para repetir. Mantén presionado para cancelar.',
+                                style: const TextStyle(
+                                  color: Colors.white54,
+                                  fontSize: 12,
                                 ),
                               ),
                             ],
@@ -1585,62 +1012,59 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                     ),
 
                     // Mapa en el tercio inferior
-                    SafeArea(
-                      top: false,
-                      child: SizedBox(
-                        height: mapHeight,
-                        width: double.infinity,
-                        child: ClipRRect(
-                          borderRadius: const BorderRadius.only(
-                            topLeft: Radius.circular(18),
-                            topRight: Radius.circular(18),
-                          ),
-                          child: ExcludeSemantics(
-                            child: FlutterMap(
-                              mapController: _mapController,
-                              options: MapOptions(
-                                initialCenter: _currentUser,
-                                initialZoom: _currentZoom,
-                                minZoom: minZoom,
-                                maxZoom: maxZoom,
-                                interactionOptions: const InteractionOptions(
-                                  flags:
-                                      InteractiveFlag.drag |
-                                      InteractiveFlag.pinchZoom |
-                                      InteractiveFlag.doubleTapZoom |
-                                      InteractiveFlag.scrollWheelZoom,
-                                ),
-                                onPositionChanged: (camera, hasGesture) {
-                                  _currentZoom = camera.zoom;
-                                },
+                    SizedBox(
+                      height: mapHeight,
+                      width: double.infinity,
+                      child: ClipRRect(
+                        borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(18),
+                          topRight: Radius.circular(18),
+                        ),
+                        child: ExcludeSemantics(
+                          child: FlutterMap(
+                            mapController: _mapController,
+                            options: MapOptions(
+                              initialCenter: _currentUser,
+                              initialZoom: _currentZoom,
+                              minZoom: minZoom,
+                              maxZoom: maxZoom,
+                              interactionOptions: const InteractionOptions(
+                                flags:
+                                    InteractiveFlag.drag |
+                                    InteractiveFlag.pinchZoom |
+                                    InteractiveFlag.doubleTapZoom |
+                                    InteractiveFlag.scrollWheelZoom,
                               ),
-                              children: [
-                                TileLayer(
-                                  urlTemplate:
-                                      'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                                  userAgentPackageName: 'campus_guia',
-                                ),
-                                if (polygons.isNotEmpty)
-                                  PolygonLayer(polygons: polygons),
-                                if (_routePoints.length >= 2)
-                                  PolylineLayer(
-                                    polylines: [
-                                      Polyline(
-                                        points: _routePoints,
-                                        strokeWidth: 5,
-                                        color: const Color(0xFF1976D2),
-                                      ),
-                                    ],
-                                  ),
-                                MarkerLayer(
-                                  markers: [
-                                    ...polygonLabels,
-                                    ...routeNodeMarkers,
-                                    userMarker,
+                              onPositionChanged: (camera, hasGesture) {
+                                _currentZoom = camera.zoom;
+                              },
+                            ),
+                            children: [
+                              TileLayer(
+                                urlTemplate:
+                                    'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                userAgentPackageName: 'campus_guia',
+                              ),
+                              if (polygons.isNotEmpty)
+                                PolygonLayer(polygons: polygons),
+                              if (_routePoints.length >= 2)
+                                PolylineLayer(
+                                  polylines: [
+                                    Polyline(
+                                      points: _routePoints,
+                                      strokeWidth: 5,
+                                      color: const Color(0xFF1976D2),
+                                    ),
                                   ],
                                 ),
-                              ],
-                            ),
+                              MarkerLayer(
+                                markers: [
+                                  ...polygonLabels,
+                                  ...routeNodeMarkers,
+                                  userMarker,
+                                ],
+                              ),
+                            ],
                           ),
                         ),
                       ),
@@ -1677,59 +1101,6 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
             ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _MetricChip extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-
-  const _MetricChip({
-    required this.icon,
-    required this.label,
-    required this.value,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white24),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, color: const Color(0xFF82B1FF), size: 18),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Colors.white54, fontSize: 11),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  value,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
       ),
     );
   }

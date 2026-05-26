@@ -35,9 +35,8 @@ class PermissionResult {
 // Android y gestionar permisos en tiempo de ejecución.
 // ============================================================
 class PermissionService {
-  static const MethodChannel _channel = MethodChannel(
-    'campus_guia/permissions',
-  );
+  static const MethodChannel _channel =
+      MethodChannel('campus_guia/permissions');
 
   // Solicita un permiso y retorna el resultado con mensaje accesible
   static Future<PermissionResult> request(AppPermission permission) async {
@@ -45,19 +44,17 @@ class PermissionService {
       return PermissionResult(
         permission: permission,
         status: PermissionStatus.denied,
-        message:
-            'Gestión de permisos nativos no disponible en versión web. '
+        message: 'Gestión de permisos nativos no disponible en versión web. '
             'Puedes continuar con funciones compatibles con navegador.',
       );
     }
 
     try {
       final String permissionKey = _toKey(permission);
-      final String result =
-          await _channel.invokeMethod<String>('requestPermission', {
-            'permission': permissionKey,
-          }) ??
-          'denied';
+      final String result = await _channel.invokeMethod(
+        'requestPermission',
+        {'permission': permissionKey},
+      );
       return _buildResult(permission, result);
     } on PlatformException catch (e) {
       // Si el channel falla, se trata como denegado
@@ -79,11 +76,10 @@ class PermissionService {
 
     try {
       final String permissionKey = _toKey(permission);
-      final String result =
-          await _channel.invokeMethod<String>('checkPermission', {
-            'permission': permissionKey,
-          }) ??
-          'denied';
+      final String result = await _channel.invokeMethod(
+        'checkPermission',
+        {'permission': permissionKey},
+      );
       return _toStatus(result);
     } on PlatformException {
       return PermissionStatus.unknown;
