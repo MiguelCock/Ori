@@ -237,6 +237,17 @@ class VoiceGuidanceService extends ChangeNotifier {
     });
   }
 
+  // HU-27: corta cualquier TTS en curso sin afectar el estado de la
+  // navegación. Útil para que el tutorial pueda pausarse o cerrarse
+  // limpiamente. Si más adelante hay TTS de navegación reproduciéndose,
+  // este método también lo interrumpirá; por eso debe usarse solo desde
+  // pantallas que no compitan con la guía activa.
+  Future<void> stopSpeaking() async {
+    try {
+      await _tts.stop();
+    } catch (_) {}
+  }
+
   // ── HU-16: Distancia restante para el chip en NavigationMapScreen ──
   double getRemainingDistance(double currentLat, double currentLng) {
     if (_steps.isEmpty || _currentStepIndex >= _steps.length) return 0;

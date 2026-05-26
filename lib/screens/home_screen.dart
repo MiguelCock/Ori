@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 // Haptic moved to main screen; keep HomeScreen minimal
 import 'permission_screen.dart';
 import 'main_screen.dart';
+import 'tutorial_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -38,6 +39,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _runStartupFlow() async {
     if (!mounted) return;
+    // HU-27: la primera vez que se abre la app mostramos el tutorial
+    // accesible antes del flujo normal de permisos.
+    final prefs = await SharedPreferences.getInstance();
+    final tutorialCompleted =
+        prefs.getBool(kTutorialCompletedPrefKey) ?? false;
+    if (!tutorialCompleted) {
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const TutorialScreen()),
+      );
+    }
     if (!mounted) return;
     await _checkIfAlreadyAccepted();
   }
@@ -101,7 +113,7 @@ class _HomeScreenState extends State<HomeScreen> {
     HapticFeedback.mediumImpact();
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         backgroundColor: const Color(0xFF1A2A3A),
         title: const Text('Ayuda', style: TextStyle(color: Colors.white, fontSize: 20)),
         content: const Text(
@@ -115,12 +127,31 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              _replayTutorial();
+            },
+            child: const Text(
+              'Repetir tutorial',
+              style: TextStyle(color: Color(0xFF82B1FF)),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Entendido', style: TextStyle(color: Color(0xFF82B1FF))),
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _replayTutorial() async {
+    _announce('Abriendo tutorial.');
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const TutorialScreen()),
+    );
+    if (!mounted) return;
+    _mainButtonFocusNode.requestFocus();
   }
 
   // Vibrate handler removed from HomeScreen — centralised on MainScreen.
