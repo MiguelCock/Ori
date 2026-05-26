@@ -98,7 +98,11 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
   }
 
   Future<void> _announceAndSpeak(String message) async {
-    await _announce(message);
+    if (_accessibilityActive) {
+      await _announce(message);
+      return;
+    }
+
     await _voiceService?.speakMessage(message);
   }
 
