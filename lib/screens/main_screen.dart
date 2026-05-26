@@ -50,6 +50,13 @@ class _MainScreenState extends State<MainScreen> {
       Provider.of<LocationService>(context, listen: false).initialize();
       Provider.of<GeoJsonService>(context, listen: false).load();
       Provider.of<RoutingService>(context, listen: false).load();
+
+      // Conectar servicios permanentemente para modo exploración
+      final voice = Provider.of<VoiceGuidanceService>(context, listen: false);
+      voice.setLocationService(Provider.of<LocationService>(context, listen: false));
+      voice.setGeoJsonService(Provider.of<GeoJsonService>(context, listen: false));
+      voice.setAnnouncer(_announce);
+
       _announce(
         'Pantalla principal de CampusGuía. Siete categorías disponibles.',
       );
@@ -81,7 +88,6 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  // HU-13: Abre DestinationScreen con los 10 lugares más cercanos
   void _openNearby() {
     final geo = Provider.of<GeoJsonService>(context, listen: false);
     final loc = Provider.of<LocationService>(context, listen: false);
@@ -210,7 +216,7 @@ class _MainScreenState extends State<MainScreen> {
       destinationLat: destination.latitude,
       destinationLng: destination.longitude,
       announceForTalkBack: _announce,
-      landmarkResolver: (lat, lng) => geo.getNearestBlockReference(lat, lng),
+      landmarkResolver: (lat, lng) => geo.getNearestLandmark(lat, lng),
       skipInitialCalibration: true,
     );
 
@@ -348,7 +354,6 @@ class _MainScreenState extends State<MainScreen> {
     if (!mounted) return;
 
     if (hasRoute) {
-      // Arranca guía por voz (HU-16/HU-17/HU-18)
       voice.startNavigation(
         route: route,
         locationService: location,
@@ -360,7 +365,6 @@ class _MainScreenState extends State<MainScreen> {
         landmarkResolver: (lat, lng) => geo.getNearestLandmark(lat, lng),
       );
 
-      // Abre mapa visual (Johan)
       await Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => NavigationMapScreen(
@@ -466,13 +470,12 @@ class _MainScreenState extends State<MainScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // HU-13: Lista de 3 cercanos + botón ver más
                       _NearbySection(
                         onSeeMore: _openNearby,
                         onSelect: _onSelected,
                       ),
 
-                      // Separador decorativo
+                      // Separador decorativo - EXCLUIDO de TalkBack
                       Padding(
                         padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
                         child: Row(
@@ -483,13 +486,15 @@ class _MainScreenState extends State<MainScreen> {
                                 thickness: 1,
                               ),
                             ),
-                            Padding(
-                              padding: EdgeInsets.symmetric(horizontal: 12),
-                              child: Text(
-                                '·  ·  ·',
-                                style: TextStyle(
-                                  color: Colors.white24,
-                                  fontSize: 12,
+                            ExcludeSemantics(
+                              child: Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 12),
+                                child: Text(
+                                  '·  ·  ·',
+                                  style: TextStyle(
+                                    color: Colors.white24,
+                                    fontSize: 12,
+                                  ),
                                 ),
                               ),
                             ),
@@ -534,9 +539,7 @@ class _MainScreenState extends State<MainScreen> {
                         ),
                         child: Semantics(
                           button: true,
-                          label: 'Test ruta',
-                          hint:
-                              'Inicia una navegación de prueba y la recorre automáticamente',
+                          label: 'Test ruta. Inicia una navegación de prueba y la recorre automáticamente',
                           child: SizedBox(
                             width: double.infinity,
                             child: ElevatedButton.icon(
@@ -556,6 +559,72 @@ class _MainScreenState extends State<MainScreen> {
                               ),
                             ),
                           ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      // SOLO Toggle de Exploración
+                      Padding(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: responsiveSpace(context, 16),
+                        ),
+                        child: Consumer<VoiceGuidanceService>(
+                          builder: (_, voice, __) {
+                            final enabled = voice.explorationModeEnabled;
+                            return Semantics(
+                              button: true,
+                              label: enabled
+                                  ? 'Modo exploración activado. Anunciará lugares al caminar sin necesidad de navegación. Toca dos veces para desactivar.'
+                                  : 'Modo exploración desactivado. Toca dos veces para activar y escuchar lugares al caminar.',
+                              child: ExcludeSemantics(
+                                child: SizedBox(
+                                  width: double.infinity,
+                                  child: OutlinedButton.icon(
+                                    onPressed: () {
+                                      HapticFeedback.mediumImpact();
+                                      voice.setExplorationModeEnabled(!enabled);
+                                      _announce(
+                                        enabled
+                                            ? 'Modo exploración desactivado.'
+                                            : 'Modo exploración activado. Escucharás anuncios de lugares al caminar.',
+                                      );
+                                    },
+                                    icon: Icon(
+                                      enabled
+                                          ? Icons.explore_rounded
+                                          : Icons.explore_off_rounded,
+                                      size: 20,
+                                    ),
+                                    label: Text(
+                                      enabled
+                                          ? 'Exploración: activada'
+                                          : 'Exploración: desactivada',
+                                    ),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: enabled
+                                          ? const Color(0xFF82B1FF)
+                                          : Colors.white38,
+                                      side: BorderSide(
+                                        color: enabled
+                                            ? const Color(0xFF82B1FF)
+                                            : Colors.white24,
+                                      ),
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 13,
+                                      ),
+                                      minimumSize:
+                                          const Size(double.infinity, 48),
+                                      textStyle: const TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
                         ),
                       ),
 
@@ -614,10 +683,7 @@ class _MainScreenState extends State<MainScreen> {
 }
 
 // ============================================================
-// HU-13 — Sección "Cerca de ti"
-// Lista de 3 lugares más cercanos con distancia,
-// más un botón "Ver más opciones cercanas" al final
-// que abre DestinationScreen con los 10 más cercanos.
+// HU-13 — Sección "Cerca de ti" (CORREGIDA para TalkBack)
 // ============================================================
 class _NearbySection extends StatelessWidget {
   final VoidCallback onSeeMore;
@@ -659,7 +725,6 @@ class _NearbySection extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Encabezado
               Padding(
                 padding: EdgeInsets.fromLTRB(
                   responsiveSpace(context, 16),
@@ -669,7 +734,7 @@ class _NearbySection extends StatelessWidget {
                 ),
                 child: Semantics(
                   header: true,
-                  label: 'Cerca de ti',
+                  label: 'Cerca de ti, lugares cercanos a tu ubicación actual',
                   child: Row(
                     children: [
                       const Icon(
@@ -704,8 +769,6 @@ class _NearbySection extends StatelessWidget {
                 endIndent: 16,
               ),
               const SizedBox(height: 6),
-
-              // Lista de 3 lugares (tapeable)
               ...nearby.map((p) {
                 final d = p.distanceFrom(here.latitude, here.longitude);
                 final dt = d >= 1000
@@ -716,72 +779,72 @@ class _NearbySection extends StatelessWidget {
                   button: true,
                   label: '${p.name}, a $dt. Toca dos veces para navegar.',
                   onTap: () => onSelect(p),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(8),
-                    onTap: () => onSelect(p),
-                    child: Padding(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: responsiveSpace(context, 16),
-                        vertical: responsiveSpace(context, 10),
-                      ),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 48,
-                            height: 48,
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF1565C0).withOpacity(0.2),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Icon(
-                              geo.iconForPlace(p),
-                              color: const Color(0xFF82B1FF),
-                              size: 18,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              p.name,
-                              textScaler: textScaler,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w500,
+                  child: ExcludeSemantics(
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(8),
+                      onTap: () => onSelect(p),
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: responsiveSpace(context, 16),
+                          vertical: responsiveSpace(context, 10),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 48,
+                              height: 48,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF1565C0).withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(10),
                               ),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF1565C0).withOpacity(0.2),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Text(
-                              dt,
-                              textScaler: textScaler,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: Color(0xFF82B1FF),
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
+                              child: Icon(
+                                geo.iconForPlace(p),
+                                color: const Color(0xFF82B1FF),
+                                size: 18,
                               ),
                             ),
-                          ),
-                        ],
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                p.name,
+                                textScaler: textScaler,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF1565C0).withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(
+                                dt,
+                                textScaler: textScaler,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Color(0xFF82B1FF),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 );
               }),
-
-              // Divisor
               const Divider(
                 height: 1,
                 thickness: 1,
@@ -789,25 +852,24 @@ class _NearbySection extends StatelessWidget {
                 indent: 16,
                 endIndent: 16,
               ),
-
-              // Botón "Ver más opciones cercanas"
+              // Botón "Ver más opciones cercanas" CORREGIDO
               Semantics(
                 button: true,
                 label: 'Ver más opciones cercanas',
-                hint: 'Toca dos veces para explorar más lugares cerca de ti.',
+                hint: 'Toca dos veces para explorar más lugares cerca de tu ubicación',
                 onTap: onSeeMore,
-                child: InkWell(
-                  borderRadius: const BorderRadius.only(
-                    bottomLeft: Radius.circular(20),
-                    bottomRight: Radius.circular(20),
-                  ),
-                  onTap: onSeeMore,
-                  child: Padding(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: responsiveSpace(context, 16),
-                      vertical: responsiveSpace(context, 14),
+                child: ExcludeSemantics(
+                  child: InkWell(
+                    borderRadius: const BorderRadius.only(
+                      bottomLeft: Radius.circular(20),
+                      bottomRight: Radius.circular(20),
                     ),
-                    child: ExcludeSemantics(
+                    onTap: onSeeMore,
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: responsiveSpace(context, 16),
+                        vertical: responsiveSpace(context, 14),
+                      ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
@@ -823,7 +885,7 @@ class _NearbySection extends StatelessWidget {
                               child: Text(
                                 'Ver más opciones cercanas',
                                 textScaler: textScaler,
-                                style: TextStyle(
+                                style: const TextStyle(
                                   color: Color(0xFF82B1FF),
                                   fontSize: 13,
                                   fontWeight: FontWeight.w600,
@@ -1047,94 +1109,7 @@ class _LocationHeaderState extends State<_LocationHeader> {
   }
 }
 
-// ── Tarjeta de guía por voz activa ──
-class _VoiceGuidanceCard extends StatelessWidget {
-  const _VoiceGuidanceCard();
-
-  @override
-  Widget build(BuildContext context) {
-    return Consumer<VoiceGuidanceService>(
-      builder: (_, voice, __) {
-        if (!voice.isNavigating) return const SizedBox.shrink();
-
-        return Container(
-          margin: const EdgeInsets.fromLTRB(16, 20, 16, 0),
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: const Color(0xFF2E7D32).withValues(alpha: 0.22),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: const Color(0xFF66BB6A), width: 1),
-          ),
-          child: Semantics(
-            label:
-                'Navegación por voz activa. ${voice.currentInstruction}. Pasos restantes ${voice.remainingSteps}.',
-            child: ExcludeSemantics(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: const [
-                      Icon(
-                        Icons.record_voice_over_rounded,
-                        color: Color(0xFFA5D6A7),
-                        size: 20,
-                      ),
-                      SizedBox(width: 8),
-                      Text(
-                        'Guía por voz activa',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    voice.currentInstruction,
-                    style: const TextStyle(color: Colors.white70, fontSize: 13),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Pasos restantes: ${voice.remainingSteps}',
-                    style: const TextStyle(
-                      color: Color(0xFFA5D6A7),
-                      fontSize: 12,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton.icon(
-                      onPressed: () {
-                        Provider.of<VoiceGuidanceService>(
-                          context,
-                          listen: false,
-                        ).stopNavigation();
-                      },
-                      icon: const Icon(
-                        Icons.stop_circle_rounded,
-                        color: Color(0xFFFFCDD2),
-                        size: 18,
-                      ),
-                      label: const Text(
-                        'Detener voz',
-                        style: TextStyle(color: Color(0xFFFFCDD2)),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-// ── Botón de categoría ──
+// ── Botón de categoría CORREGIDO para TalkBack ──
 class _CatBtn extends StatelessWidget {
   final CategoryMeta cat;
   final void Function(CategoryMeta) onTap;
@@ -1143,68 +1118,75 @@ class _CatBtn extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final textScaler = clampedTextScaler(context);
-    return FocusTraversalOrder(
-      order: NumericFocusOrder(cat.order.toDouble()),
-      child: Semantics(
-        sortKey: OrdinalSortKey(cat.order.toDouble()),
-        button: true,
-        label: cat.label,
-        hint: 'Toca dos veces para ver ${cat.label}',
-        onTap: () => onTap(cat),
-        child: GestureDetector(
-          onTap: () => onTap(cat),
-          child: Container(
-            constraints: BoxConstraints(
-              minHeight: responsiveSpace(context, 90),
-              minWidth: 48,
-            ),
-            padding: EdgeInsets.symmetric(
-              horizontal: responsiveSpace(context, 6),
-              vertical: responsiveSpace(context, 8),
-            ),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.06),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-              boxShadow: const [
-                BoxShadow(
-                  color: Color(0x22000000),
-                  blurRadius: 6,
-                  offset: Offset(0, 3),
-                ),
-              ],
-            ),
-            child: ExcludeSemantics(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Container(
-                    width: responsiveSpace(context, 40),
-                    height: responsiveSpace(context, 40),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1565C0).withValues(alpha: 0.22),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(
-                      cat.iconData,
-                      color: const Color(0xFF82B1FF),
-                      size: 22,
-                    ),
-                  ),
-                  const SizedBox(height: 7),
-                  Text(
-                    cat.label,
-                    textScaler: textScaler,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    textAlign: TextAlign.center,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+    return Semantics(
+      button: true,
+      label: cat.label,
+      hint: 'Toca dos veces para explorar lugares',
+      onTap: () => onTap(cat),
+      child: ExcludeSemantics(
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(16),
+          child: InkWell(
+            onTap: () => onTap(cat),
+            borderRadius: BorderRadius.circular(16),
+            splashColor: const Color(0xFF1565C0).withValues(alpha: 0.28),
+            highlightColor: const Color(0xFF1565C0).withValues(alpha: 0.14),
+            child: Ink(
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.06),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x22000000),
+                    blurRadius: 6,
+                    offset: Offset(0, 3),
                   ),
                 ],
+              ),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  minHeight: responsiveSpace(context, 90),
+                  minWidth: 48,
+                ),
+                child: Padding(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: responsiveSpace(context, 6),
+                    vertical: responsiveSpace(context, 8),
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        width: responsiveSpace(context, 40),
+                        height: responsiveSpace(context, 40),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1565C0).withValues(alpha: 0.22),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          cat.iconData,
+                          color: const Color(0xFF82B1FF),
+                          size: 22,
+                        ),
+                      ),
+                      const SizedBox(height: 7),
+                      Text(
+                        cat.label,
+                        textScaler: textScaler,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
           ),
