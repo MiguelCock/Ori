@@ -20,7 +20,12 @@ class RouteGuidanceBuilder {
     required double destinationLat,
     required double destinationLng,
     required String destinationName,
-    String? Function(double lat, double lng)? landmarkResolver,
+    ({String name, String side})? Function(
+      double lat,
+      double lng,
+      double? headingDegrees,
+    )?
+    landmarkResolver,
     double? initialHeadingDegrees,
     double minInstructionDistanceMeters = 12,
     double straightBearingThresholdDegrees = 18.0,
@@ -40,11 +45,13 @@ class RouteGuidanceBuilder {
       final reference = landmarkResolver?.call(
         leg.endPoint.latitude,
         leg.endPoint.longitude,
+        leg.bearingDegrees,
       );
 
-      final includeReference = reference != null && reference != lastReference;
+      final includeReference =
+          reference != null && reference.name != lastReference;
       if (reference != null) {
-        lastReference = reference;
+        lastReference = reference.name;
       }
 
       final instruction = _legInstruction(
@@ -148,7 +155,7 @@ class RouteGuidanceBuilder {
     required bool isFinalLeg,
     required double? initialHeadingDegrees,
     required bool includeReference,
-    required String? reference,
+    required ({String name, String side})? reference,
     required double destinationLat,
     required double destinationLng,
     required String destinationName,
@@ -184,16 +191,31 @@ class RouteGuidanceBuilder {
         destinationName: destinationName,
       );
       if (includeReference && reference != null) {
-        return '$baseInstruction $arrival. Pasarás junto a $reference.';
+        return '$baseInstruction $arrival. Pasarás junto a ${reference.name}${_referenceSideText(reference.side)}.';
       }
       return '$baseInstruction $arrival.';
     }
 
     if (includeReference && reference != null) {
-      return '$baseInstruction Pasarás junto a $reference.';
+      return '$baseInstruction Pasarás junto a ${reference.name}${_referenceSideText(reference.side)}.';
     }
 
     return baseInstruction;
+  }
+
+  static String _referenceSideText(String side) {
+    switch (side) {
+      case 'derecha':
+        return ' a tu derecha';
+      case 'izquierda':
+        return ' a tu izquierda';
+      case 'frente':
+        return ' al frente';
+      case 'detrás':
+        return ' detrás de ti';
+      default:
+        return '';
+    }
   }
 
   static String _initialOrientationInstruction({

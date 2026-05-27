@@ -150,94 +150,6 @@ class _MainScreenState extends State<MainScreen> {
     return nearby.isNotEmpty ? nearby.first : null;
   }
 
-  Future<void> _startRouteTest() async {
-    HapticFeedback.mediumImpact();
-
-    final location = Provider.of<LocationService>(context, listen: false);
-    final routing = Provider.of<RoutingService>(context, listen: false);
-    final geo = Provider.of<GeoJsonService>(context, listen: false);
-
-    if (location.currentLocation == null) {
-      _announce('No se puede iniciar la prueba. Ubicación no disponible.');
-      return;
-    }
-
-    if (!geo.isLoaded) {
-      await geo.load();
-    }
-
-    if (!location.canStartNavigation()) {
-      _announce('No se puede iniciar la prueba de navegación ahora.');
-      return;
-    }
-
-    final origin = location.currentLocation!;
-    if (!geo.isInsideCampus(origin.latitude, origin.longitude)) {
-      _announce('Debes estar dentro del campus para probar la navegación.');
-      return;
-    }
-
-    final destination = _pickTestDestination(geo, location);
-    if (destination == null) {
-      _announce('No encontré un destino cercano para la prueba.');
-      return;
-    }
-
-    _announce('Iniciando prueba de ruta hacia ${destination.name}.');
-
-    final route = await routing.buildRoute(
-      originLat: origin.latitude,
-      originLng: origin.longitude,
-      destinationLat: destination.latitude,
-      destinationLng: destination.longitude,
-      originPolygon: geo
-          .getPlaceContaining(origin.latitude, origin.longitude)
-          ?.polygon,
-      destinationPolygon: destination.polygon,
-    );
-
-    if (route == null) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No se pudo generar una ruta de prueba.'),
-          backgroundColor: Color(0xFFB00020),
-        ),
-      );
-      return;
-    }
-
-    final voice = Provider.of<VoiceGuidanceService>(context, listen: false);
-    await voice.startNavigation(
-      route: route,
-      locationService: location,
-      routingService: routing,
-      destinationName: destination.name,
-      destinationLat: destination.latitude,
-      destinationLng: destination.longitude,
-      announceForTalkBack: _announce,
-      landmarkResolver: (lat, lng) => geo.getNearestLandmark(lat, lng),
-      skipInitialCalibration: true,
-    );
-
-    if (!mounted) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => NavigationMapScreen(
-          destinationName: destination.name,
-          startLat: origin.latitude,
-          startLng: origin.longitude,
-          destLat: destination.latitude,
-          destLng: destination.longitude,
-          highlightCategoryId: destination.primaryCategory,
-          initialRoute: route,
-          destinationPolygon: destination.polygon,
-          autoStartSimulation: true,
-        ),
-      ),
-    );
-  }
-
   Future<void> _onSelected(CampusPlace place) async {
     HapticFeedback.heavyImpact();
     final location = Provider.of<LocationService>(context, listen: false);
@@ -362,7 +274,12 @@ class _MainScreenState extends State<MainScreen> {
         destinationLat: place.latitude,
         destinationLng: place.longitude,
         announceForTalkBack: _announce,
-        landmarkResolver: (lat, lng) => geo.getNearestLandmark(lat, lng),
+        landmarkResolver: (lat, lng, headingDegrees) =>
+            geo.getNearestBlockReferenceWithSide(
+          lat,
+          lng,
+          headingDegrees,
+        ),
       );
 
       await Navigator.of(context).push(
@@ -382,64 +299,25 @@ class _MainScreenState extends State<MainScreen> {
       return;
     }
 
-    showDialog(
+    showDialog<void>(
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: const Color(0xFF1A2A3A),
-        title: Text(
-          hasRoute ? 'Ruta generada' : 'Ruta no disponible',
-          style: const TextStyle(color: Colors.white),
+        title: const Text(
+          'Ruta no disponible',
+          style: TextStyle(color: Colors.white),
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              place.name,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              place.description.split('\n').first,
-              style: const TextStyle(color: Colors.white70),
-            ),
-            const SizedBox(height: 14),
-            if (hasRoute) ...[
-              Text(
-                'Distancia: ${route.totalDistanceMeters.round()} m',
-                style: const TextStyle(color: Color(0xFF82B1FF)),
-              ),
-              Text(
-                'Tiempo estimado: ${route.estimatedWalkTime.inMinutes} min',
-                style: const TextStyle(color: Color(0xFF82B1FF)),
-              ),
-              Text(
-                'Nodos de ruta: ${route.nodePath.length}',
-                style: const TextStyle(color: Color(0xFF82B1FF)),
-              ),
-              Text(
-                'Cálculo: ${route.computationTimeMs} ms',
-                style: const TextStyle(color: Color(0xFF82B1FF)),
-              ),
-            ] else ...[
-              Text(
-                routing.lastError.isEmpty
-                    ? 'No hay conexión peatonal entre origen y destino.'
-                    : routing.lastError,
-                style: const TextStyle(color: Color(0xFFFF8A80)),
-              ),
-            ],
-          ],
+        content: Text(
+          routing.lastError.isEmpty
+              ? 'No hay conexión peatonal entre origen y destino.'
+              : routing.lastError,
+          style: const TextStyle(color: Colors.white70),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.of(context).pop(),
             child: const Text(
-              'Cerrar',
+              'Entendido',
               style: TextStyle(color: Color(0xFF82B1FF)),
             ),
           ),
@@ -451,231 +329,184 @@ class _MainScreenState extends State<MainScreen> {
   @override
   Widget build(BuildContext context) {
     final textScaler = clampedTextScaler(context);
+
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xFF0D1F3C), Color(0xFF081526)],
-          ),
-        ),
-        child: SafeArea(
-          child: Column(
-            children: [
-              const _LocationHeader(),
-              Expanded(
-                child: SingleChildScrollView(
-                  physics: const BouncingScrollPhysics(),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _NearbySection(
-                        onSeeMore: _openNearby,
-                        onSelect: _onSelected,
-                      ),
-
-                      // Separador decorativo - EXCLUIDO de TalkBack
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
-                        child: Row(
-                          children: const [
-                            Expanded(
-                              child: Divider(
-                                color: Colors.white12,
-                                thickness: 1,
+      backgroundColor: const Color(0xFF0D1B2A),
+      body: SafeArea(
+        child: Column(
+          children: [
+            const _LocationHeader(),
+            Expanded(
+              child: SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _NearbySection(
+                      onSeeMore: _openNearby,
+                      onSelect: _onSelected,
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
+                      child: Row(
+                        children: const [
+                          Expanded(
+                            child: Divider(
+                              color: Colors.white12,
+                              thickness: 1,
+                            ),
+                          ),
+                          ExcludeSemantics(
+                            child: Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 12),
+                              child: Text(
+                                '·  ·  ·',
+                                style: TextStyle(
+                                  color: Colors.white24,
+                                  fontSize: 12,
+                                ),
                               ),
                             ),
-                            ExcludeSemantics(
-                              child: Padding(
-                                padding: EdgeInsets.symmetric(horizontal: 12),
-                                child: Text(
-                                  '·  ·  ·',
-                                  style: TextStyle(
-                                    color: Colors.white24,
-                                    fontSize: 12,
+                          ),
+                          Expanded(
+                            child: Divider(
+                              color: Colors.white12,
+                              thickness: 1,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        responsiveSpace(context, 20),
+                        responsiveSpace(context, 14),
+                        responsiveSpace(context, 20),
+                        responsiveSpace(context, 12),
+                      ),
+                      child: Semantics(
+                        header: true,
+                        label: 'Categorías de lugares',
+                        child: ExcludeSemantics(
+                          child: Text(
+                            '¿A dónde quieres ir?',
+                            textScaler: textScaler,
+                            softWrap: true,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: responsiveSpace(context, 16),
+                      ),
+                      child: Consumer<VoiceGuidanceService>(
+                        builder: (_, voice, __) {
+                          final enabled = voice.explorationModeEnabled;
+                          return Semantics(
+                            button: true,
+                            label: enabled
+                                ? 'Modo exploración activado. Anunciará lugares al caminar sin necesidad de navegación. Toca dos veces para desactivar.'
+                                : 'Modo exploración desactivado. Toca dos veces para activar y escuchar lugares al caminar.',
+                            child: ExcludeSemantics(
+                              child: SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  onPressed: () {
+                                    HapticFeedback.mediumImpact();
+                                    voice.setExplorationModeEnabled(!enabled);
+                                    _announce(
+                                      enabled
+                                          ? 'Modo exploración desactivado.'
+                                          : 'Modo exploración activado. Escucharás anuncios de lugares al caminar.',
+                                    );
+                                  },
+                                  icon: Icon(
+                                    enabled
+                                        ? Icons.explore_rounded
+                                        : Icons.explore_off_rounded,
+                                    size: 20,
                                   ),
-                                ),
-                              ),
-                            ),
-                            Expanded(
-                              child: Divider(
-                                color: Colors.white12,
-                                thickness: 1,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-
-                      Padding(
-                        padding: EdgeInsets.fromLTRB(
-                          responsiveSpace(context, 20),
-                          responsiveSpace(context, 14),
-                          responsiveSpace(context, 20),
-                          responsiveSpace(context, 12),
-                        ),
-                        child: Semantics(
-                          header: true,
-                          label: 'Categorías de lugares',
-                          child: ExcludeSemantics(
-                            child: Text(
-                              '¿A dónde quieres ir?',
-                              textScaler: textScaler,
-                              softWrap: true,
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-
-                      Padding(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: responsiveSpace(context, 16),
-                        ),
-                        child: Semantics(
-                          button: true,
-                          label: 'Test ruta. Inicia una navegación de prueba y la recorre automáticamente',
-                          child: SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton.icon(
-                              onPressed: _startRouteTest,
-                              icon: const Icon(Icons.route_rounded),
-                              label: const Text('Test ruta'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF1565C0),
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 16,
-                                ),
-                                textStyle: const TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      // SOLO Toggle de Exploración
-                      Padding(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: responsiveSpace(context, 16),
-                        ),
-                        child: Consumer<VoiceGuidanceService>(
-                          builder: (_, voice, __) {
-                            final enabled = voice.explorationModeEnabled;
-                            return Semantics(
-                              button: true,
-                              label: enabled
-                                  ? 'Modo exploración activado. Anunciará lugares al caminar sin necesidad de navegación. Toca dos veces para desactivar.'
-                                  : 'Modo exploración desactivado. Toca dos veces para activar y escuchar lugares al caminar.',
-                              child: ExcludeSemantics(
-                                child: SizedBox(
-                                  width: double.infinity,
-                                  child: OutlinedButton.icon(
-                                    onPressed: () {
-                                      HapticFeedback.mediumImpact();
-                                      voice.setExplorationModeEnabled(!enabled);
-                                      _announce(
-                                        enabled
-                                            ? 'Modo exploración desactivado.'
-                                            : 'Modo exploración activado. Escucharás anuncios de lugares al caminar.',
-                                      );
-                                    },
-                                    icon: Icon(
-                                      enabled
-                                          ? Icons.explore_rounded
-                                          : Icons.explore_off_rounded,
-                                      size: 20,
-                                    ),
-                                    label: Text(
-                                      enabled
-                                          ? 'Exploración: activada'
-                                          : 'Exploración: desactivada',
-                                    ),
-                                    style: OutlinedButton.styleFrom(
-                                      foregroundColor: enabled
+                                  label: Text(
+                                    enabled
+                                        ? 'Exploración: activada'
+                                        : 'Exploración: desactivada',
+                                  ),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: enabled
+                                        ? const Color(0xFF82B1FF)
+                                        : Colors.white38,
+                                    side: BorderSide(
+                                      color: enabled
                                           ? const Color(0xFF82B1FF)
-                                          : Colors.white38,
-                                      side: BorderSide(
-                                        color: enabled
-                                            ? const Color(0xFF82B1FF)
-                                            : Colors.white24,
-                                      ),
-                                      padding: const EdgeInsets.symmetric(
-                                        vertical: 13,
-                                      ),
-                                      minimumSize:
-                                          const Size(double.infinity, 48),
-                                      textStyle: const TextStyle(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w600,
-                                      ),
+                                          : Colors.white24,
+                                    ),
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 13,
+                                    ),
+                                    minimumSize: const Size(double.infinity, 48),
+                                    textStyle: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
                                     ),
                                   ),
                                 ),
                               ),
-                            );
-                          },
-                        ),
+                            ),
+                          );
+                        },
                       ),
-
-                      const SizedBox(height: 12),
-
-                      Padding(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: responsiveSpace(context, 16),
-                        ),
-                        child: Consumer<GeoJsonService>(
-                          builder: (_, geo, __) {
-                            final cats = geo.categories;
-                            return LayoutBuilder(
-                              builder: (context, constraints) {
-                                final availableWidth = constraints.maxWidth;
-                                final columns = availableWidth < 330
-                                    ? 2
-                                    : availableWidth > 520
-                                    ? 4
-                                    : 3;
-                                final spacing = responsiveSpace(context, 12);
-                                final itemWidth =
-                                    (availableWidth - spacing * (columns - 1)) /
-                                    columns;
-                                return Wrap(
-                                  spacing: spacing,
-                                  runSpacing: spacing,
-                                  children: [
-                                    for (final cat in cats)
-                                      SizedBox(
-                                        width: itemWidth,
-                                        child: _CatBtn(
-                                          cat: cat,
-                                          onTap: _openCategory,
-                                        ),
+                    ),
+                    const SizedBox(height: 12),
+                    Padding(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: responsiveSpace(context, 16),
+                      ),
+                      child: Consumer<GeoJsonService>(
+                        builder: (_, geo, __) {
+                          final cats = geo.categories;
+                          return LayoutBuilder(
+                            builder: (context, constraints) {
+                              final availableWidth = constraints.maxWidth;
+                              final columns = availableWidth < 330
+                                  ? 2
+                                  : availableWidth > 520
+                                  ? 4
+                                  : 3;
+                              final spacing = responsiveSpace(context, 12);
+                              final itemWidth =
+                                  (availableWidth - spacing * (columns - 1)) /
+                                  columns;
+                              return Wrap(
+                                spacing: spacing,
+                                runSpacing: spacing,
+                                children: [
+                                  for (final cat in cats)
+                                    SizedBox(
+                                      width: itemWidth,
+                                      child: _CatBtn(
+                                        cat: cat,
+                                        onTap: _openCategory,
                                       ),
-                                  ],
-                                );
-                              },
-                            );
-                          },
-                        ),
+                                    ),
+                                ],
+                              );
+                            },
+                          );
+                        },
                       ),
-
-                      const SizedBox(height: 28),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(height: 28),
+                  ],
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

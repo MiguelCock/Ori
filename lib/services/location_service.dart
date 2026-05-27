@@ -56,6 +56,9 @@ enum LocationStatus {
   disabled,
 }
 
+// Callback para anunciar mensajes al usuario (TTS o TalkBack)
+typedef LocationAnnouncer = Future<void> Function(String message);
+
 class LocationService extends ChangeNotifier {
   static final LocationService _instance = LocationService._internal();
   factory LocationService() => _instance;
@@ -65,6 +68,10 @@ class LocationService extends ChangeNotifier {
   LocationData? _currentLocation;
   String _lastError = '';
   bool _simulationMode = false;
+
+  // Callback inyectado desde la UI para hablar mensajes de estado del GPS.
+  // Si no se asigna, los mensajes solo se imprimen en consola.
+  LocationAnnouncer? _announcer;
 
   Stream<Position>? _positionStream;
 
@@ -76,6 +83,13 @@ class LocationService extends ChangeNotifier {
   bool get hasValidLocation =>
       _currentLocation != null && _currentLocation!.isValidForNavigation;
 
+  /// Asigna el callback que se usará para anunciar mensajes de estado GPS.
+  /// Debe llamarse desde VoiceGuidanceService o la capa de UI con acceso
+  /// a TTS / SemanticsService.
+  void setAnnouncer(LocationAnnouncer announcer) {
+    _announcer = announcer;
+  }
+
   // Inicializar y comenzar a escuchar ubicación
   Future<void> initialize() async {
     try {
@@ -84,7 +98,7 @@ class LocationService extends ChangeNotifier {
       bool isLocationEnabled = await Geolocator.isLocationServiceEnabled();
       if (!isLocationEnabled) {
         _updateStatus(LocationStatus.disabled);
-        _announce(
+        await _announce(
           'El GPS está desactivado. Actívalo en ajustes para usar la navegación.',
         );
         return;
@@ -96,14 +110,14 @@ class LocationService extends ChangeNotifier {
         permission = await Geolocator.requestPermission();
         if (permission == LocationPermission.denied) {
           _updateStatus(LocationStatus.permissionDenied);
-          _announce('Permiso de ubicación denegado.');
+          await _announce('Permiso de ubicación denegado.');
           return;
         }
       }
 
       if (permission == LocationPermission.deniedForever) {
         _updateStatus(LocationStatus.permissionDenied);
-        _announce(
+        await _announce(
           'Permiso de ubicación bloqueado permanentemente. Ve a ajustes para activarlo.',
         );
         return;
@@ -121,16 +135,11 @@ class LocationService extends ChangeNotifier {
   // Iniciar escucha en tiempo real
   Future<void> _startListening() async {
     if (_simulationMode) return;
-    // En Android usamos AndroidSettings para forzar explícitamente el uso del
-    // FusedLocationProvider de Google Play Services, que combina GPS + WiFi +
-    // Cell towers con filtro Kalman interno — más preciso que el GPS puro.
-    // forceLocationManager: false  →  FusedLocationProvider (recomendado)
-    // forceLocationManager: true   →  Android LocationManager nativo (menos preciso)
     final LocationSettings locationSettings = Platform.isAndroid
         ? AndroidSettings(
             accuracy: LocationAccuracy.bestForNavigation,
             distanceFilter: 0,
-            forceLocationManager: false, // Usar FusedLocationProvider
+            forceLocationManager: false,
             intervalDuration: const Duration(milliseconds: 500),
           )
         : const LocationSettings(
@@ -142,11 +151,8 @@ class LocationService extends ChangeNotifier {
       locationSettings: locationSettings,
     );
 
-    // Escuchar actualizaciones
     _positionStream!.listen(_handlePositionUpdate, onError: _handleError);
 
-    // Obtener una ubicación inicial inmediata
-    // timeLimit evita que la app se cuelgue si el GPS tarda en adquirir señal
     try {
       Position initialPosition = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.bestForNavigation,
@@ -154,7 +160,6 @@ class LocationService extends ChangeNotifier {
       );
       _handlePositionUpdate(initialPosition);
     } catch (e) {
-      // No es fatal: el stream seguirá entregando posiciones una vez haya señal
       debugPrint('GPS: posición inicial no disponible aún — $e');
     }
   }
@@ -162,10 +167,6 @@ class LocationService extends ChangeNotifier {
   // Manejar actualización de posición
   void _handlePositionUpdate(Position position) {
     if (_simulationMode) return;
-    // Filtro de calidad: si ya tenemos una posición buena (< 15m) y llega una
-    // muy mala (> 50m), la descartamos para evitar saltos bruscos en la ruta.
-    // Umbral subido de 30m a 50m para no congelar la posición en campus
-    // donde el GPS fluctúa normalmente entre 15–35m entre edificios.
     if (_currentLocation != null &&
         _currentLocation!.accuracy < 15.0 &&
         position.accuracy > 50.0) {
@@ -178,12 +179,10 @@ class LocationService extends ChangeNotifier {
     LocationData newLocation = LocationData.fromPosition(position);
     final previousStatus = _status;
 
-    // Determinar estado según precisión
     final LocationStatus newStatus = position.accuracy <= 15.0
         ? LocationStatus.active
         : LocationStatus.lowAccuracy;
 
-    // Anunciar cambios importantes de estado
     if (_status != newStatus) {
       switch (newStatus) {
         case LocationStatus.active:
@@ -249,9 +248,10 @@ class LocationService extends ChangeNotifier {
     seedLocation(location);
   }
 
-  // Anuncio accesible
-  void _announce(String message) {
-    debugPrint('TalkBack: $message');
+  // Anuncio accesible — usa el callback si está disponible, si no solo log.
+  Future<void> _announce(String message) async {
+    debugPrint('GPS_ANNOUNCE: $message');
+    await _announcer?.call(message);
   }
 
   // Verificar si se puede iniciar navegación

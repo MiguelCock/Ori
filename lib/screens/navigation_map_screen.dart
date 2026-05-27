@@ -45,6 +45,8 @@ class NavigationMapScreen extends StatefulWidget {
 class _NavigationMapScreenState extends State<NavigationMapScreen> {
   final MapController _mapController = MapController();
 
+  static const double _fixedZoom = 20.0;
+
   GeoJsonService? _geoService;
   LocationService? _locationService;
   RoutingService? _routingService;
@@ -53,7 +55,6 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
   bool _isLoading = true;
   bool _hasError = false;
   bool _voiceStarted = false;
-  bool _usageInstructionsShown = false;
   bool _routeSimulationRunning = false;
   bool _autoSimulationScheduled = false;
 
@@ -62,7 +63,6 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
   late LatLng _lastRouteOrigin;
 
   RouteResult? _activeRoute;
-  double _currentZoom = 17;
 
   List<LatLng> _routePoints = [];
   List<GuidanceStep> _routeSteps = [];
@@ -327,9 +327,13 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
         destinationLat: widget.destLat,
         destinationLng: widget.destLng,
         announceForTalkBack: _announce,
-        landmarkResolver: (lat, lng) => geoService == null
+        landmarkResolver: (lat, lng, headingDegrees) => geoService == null
             ? null
-            : geoService.getNearestBlockReference(lat, lng),
+            : geoService.getNearestBlockReferenceWithSide(
+                lat,
+                lng,
+                headingDegrees,
+              ),
         onArrival: _showArrivalOverlay,
         skipInitialCalibration: widget.autoStartSimulation,
       );
@@ -346,58 +350,6 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
       });
       return;
     }
-
-    await _showUsageInstructionsIfNeeded();
-  }
-
-  String _usageInstructionsText() {
-    return 'Navegación iniciada. Toca una vez la pantalla para repetir tu ubicación e indicaciones. '
-        'Usa el botón de volver para finalizar la navegación.';
-  }
-
-  Future<void> _showUsageInstructionsIfNeeded() async {
-    if (_usageInstructionsShown || !mounted) return;
-    _usageInstructionsShown = true;
-
-    final accessibilityOn =
-        SemanticsBinding.instance.semanticsEnabled ||
-        WidgetsBinding.instance.platformDispatcher.accessibilityFeatures
-            .accessibleNavigation;
-
-    if (accessibilityOn) {
-      return;
-    }
-
-    final message = _usageInstructionsText();
-    await _voiceService?.speak(message);
-    if (!mounted) return;
-
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: true,
-      builder: (context) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF12263A),
-          title: const Text(
-            'Instrucciones de uso',
-            style: TextStyle(color: Colors.white),
-          ),
-          content: Text(
-            message,
-            style: const TextStyle(color: Colors.white70, height: 1.4),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text(
-                'Entendido',
-                style: TextStyle(color: Color(0xFF82B1FF)),
-              ),
-            ),
-          ],
-        );
-      },
-    );
   }
 
   Future<void> _repeatCurrentGuidanceFromGesture() async {
@@ -645,7 +597,7 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
   /// Centra el mapa sobre la posición actual del usuario con el zoom fijo.
   void _centerMapOnUser() {
     try {
-      _mapController.move(_currentUser, _currentZoom);
+      _mapController.move(_currentUser, _fixedZoom);
     } catch (_) {
       // El controlador puede no estar listo todavía; se ignora silenciosamente.
     }
@@ -659,6 +611,20 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     if (!mounted) return;
 
     final voice = _voiceService;
+    final destinationPolygon = widget.destinationPolygon;
+    if (voice?.isNavigating == true &&
+        !voice!.isPaused &&
+        destinationPolygon != null &&
+        destinationPolygon.length >= 3 &&
+        _isInsidePolygon(
+          next.latitude,
+          next.longitude,
+          destinationPolygon,
+        )) {
+      voice.completeNavigationIfActive();
+      return;
+    }
+
     final remaining = voice?.getRemainingDistance(
       here.latitude,
       here.longitude,
@@ -815,7 +781,6 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     _currentUser = LatLng(widget.startLat, widget.startLng);
     _lastRouteOrigin = _currentUser;
     _lastRouteUpdate = DateTime.now();
-    _currentZoom = 17;
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (_usesLocalRouting && widget.autoStartSimulation) {
@@ -979,7 +944,7 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
       ),
     );
 
-    const maxZoom = 24.0;
+    const maxZoom = _fixedZoom;
     const minZoom = 3.0;
 
     return WillPopScope(
@@ -1137,7 +1102,7 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                               mapController: _mapController,
                               options: MapOptions(
                                 initialCenter: _currentUser,
-                                initialZoom: _currentZoom,
+                                initialZoom: _fixedZoom,
                                 minZoom: minZoom,
                                 maxZoom: maxZoom,
                                 // Sin flags de interacción: el mapa es estático.
@@ -1179,32 +1144,27 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
                   ],
                 ),
 
-                // ── CAMBIO 4: Contenedor transparente de indicación ─────────
-                // Ocupa toda la pantalla desde el final del header hasta abajo,
-                // de modo que los taps sobre el mapa los captura este widget
-                // y TalkBack lo lee como la indicación activa.
+                // ── CAMBIO 4: Semantics y área táctil separadas ────────────
                 Positioned(
                   left: 0,
                   right: 0,
-                  // Se posiciona a partir del área del header (topHeight) y
-                  // llega hasta el borde inferior de la pantalla.
                   top: topHeight,
-                  bottom: 0,
+                  height: 0,
                   child: Semantics(
-                    // Focus por defecto: este es el primer elemento en recibir
-                    // el foco de TalkBack al entrar a la pantalla.
-                    focusable: true,
-                    focused: true,
                     label: displayedInstruction,
-                    hint: 'Toca para repetir la indicación',
-                    onTapHint: 'Repetir indicación',
+                    excludeSemantics: true,
+                    child: const SizedBox.shrink(),
+                  ),
+                ),
+                Positioned.fill(
+                  top: topHeight,
+                  child: Semantics(
+                    focusable: true,
                     onTap: _repeatCurrentGuidanceFromGesture,
                     excludeSemantics: true,
                     child: GestureDetector(
                       behavior: HitTestBehavior.opaque,
                       onTap: _repeatCurrentGuidanceFromGesture,
-                      // Contenedor completamente transparente; no dibuja nada
-                      // sobre el mapa, solo intercepta los eventos de toque.
                       child: const SizedBox.expand(),
                     ),
                   ),

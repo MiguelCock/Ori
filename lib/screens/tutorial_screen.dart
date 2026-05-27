@@ -193,6 +193,10 @@ class _AccessibleTutorialState extends State<_AccessibleTutorial> {
     _finishing = true;
     HapticFeedback.mediumImpact();
     try {
+      await Provider.of<VoiceGuidanceService>(context, listen: false)
+          .stopSpeaking();
+    } catch (_) {}
+    try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(kTutorialCompletedPrefKey, true);
     } catch (_) {}
@@ -484,13 +488,14 @@ class _AnimatedTutorialState extends State<_AnimatedTutorial> {
     _playToken++;
     HapticFeedback.mediumImpact();
     try {
+      await Provider.of<VoiceGuidanceService>(context, listen: false)
+          .stopSpeaking();
+    } catch (_) {}
+    try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(kTutorialCompletedPrefKey, true);
     } catch (_) {}
     if (!mounted) return;
-    try {
-      Provider.of<VoiceGuidanceService>(context, listen: false).stopSpeaking();
-    } catch (_) {}
     _announce(completed ? 'Tutorial finalizado.' : 'Tutorial omitido.');
     Navigator.of(context).pop();
   }

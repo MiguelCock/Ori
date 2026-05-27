@@ -14,7 +14,11 @@ import 'geojson_service.dart';
 import 'haptic_service.dart';
 
 typedef VoiceAnnouncer = Future<void> Function(String message);
-typedef LandmarkResolver = String? Function(double lat, double lng);
+typedef LandmarkResolver = ({String name, String side})? Function(
+  double lat,
+  double lng,
+  double? headingDegrees,
+);
 typedef NavigationArrivalHandler = Future<void> Function();
 
 // Mensajes del sistema centralizados
@@ -49,7 +53,30 @@ class NavigationMessages {
       'Vas correctamente por la ruta. Próxima indicación en $nextInstructionMeters metros. '
       'Faltan $remainingDistanceText para llegar a $destination.';
 
-  static String passingLandmark(String landmark) => 'Estás pasando junto a $landmark.';
+  static String passingLandmark(
+    String landmark, {
+    String? side,
+  }) {
+    final sideText = _landmarkSideText(side);
+    return sideText.isEmpty
+        ? 'Estás pasando junto a $landmark.'
+        : 'Estás pasando junto a $landmark$sideText.';
+  }
+
+  static String _landmarkSideText(String? side) {
+    switch (side) {
+      case 'derecha':
+        return ', a tu derecha';
+      case 'izquierda':
+        return ', a tu izquierda';
+      case 'frente':
+        return ', al frente';
+      case 'detrás':
+        return ', detrás de ti';
+      default:
+        return '';
+    }
+  }
 
   static String noPointsForGuidance() =>
       'No hay suficientes puntos para guiar por voz.';
@@ -111,6 +138,7 @@ class VoiceGuidanceService extends ChangeNotifier {
   bool _arrivalHandled = false;
   bool _arrivalHapticTriggered = false;
   Future<void> _voiceQueue = Future<void>.value();
+  int _voiceTaskGeneration = 0;
   bool _suppressTtsWhenAccessibilityActive = false;
 
   // HU-16: Control de landmarks durante navegación
@@ -151,6 +179,12 @@ class VoiceGuidanceService extends ChangeNotifier {
   static const String _landmarksEnabledPrefKey = 'landmarks_enabled';
   static const String _explorationModePrefKey = 'exploration_mode_enabled';
 
+  // FIX recálculo falso: mínimo de muestras consecutivas fuera de ruta antes
+  // de considerar que el usuario realmente se alejó. Evita que una lectura
+  // GPS errática (spike) dispare un rerouting innecesario.
+  static const int _minOffRouteSamplesBeforeReroute = 3;
+  int _consecutiveOffRouteSamples = 0;
+
   double _minInstructionDistanceMeters = 12;
 
   bool get isNavigating => _isNavigating;
@@ -184,8 +218,7 @@ class VoiceGuidanceService extends ChangeNotifier {
     }
     _preferencesLoaded = true;
     notifyListeners();
-    
-    // Iniciar modo exploración si estaba activo
+
     if (_explorationModeEnabled && !_isNavigating) {
       _startExplorationMode();
     }
@@ -226,13 +259,13 @@ class VoiceGuidanceService extends ChangeNotifier {
     if (_explorationModeEnabled == enabled) return;
     _explorationModeEnabled = enabled;
     notifyListeners();
-    
+
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_explorationModePrefKey, enabled);
       debugPrint('💾 Preferencia exploración guardada: $enabled');
     } catch (_) {}
-    
+
     if (enabled && !_isNavigating) {
       _startExplorationMode();
     } else if (!enabled) {
@@ -242,6 +275,10 @@ class VoiceGuidanceService extends ChangeNotifier {
 
   void setLocationService(LocationService service) {
     _permanentLocationService = service;
+    // FIX: conectar el announcer del GPS para que sus mensajes lleguen al usuario.
+    service.setAnnouncer((message) async {
+      await _speakAndAnnounce(message);
+    });
     debugPrint('📍 VoiceGuidance: LocationService permanente asignado');
   }
 
@@ -258,11 +295,11 @@ class VoiceGuidanceService extends ChangeNotifier {
   void _startExplorationMode() {
     if (_explorationTimer != null) return;
     if (_isNavigating) return;
-    
+
     _explorationTimer = Timer.periodic(const Duration(seconds: 4), (timer) async {
       await _checkExplorationLandmarks();
     });
-    
+
     debugPrint('🔍 Modo exploración INICIADO');
   }
 
@@ -303,7 +340,7 @@ class VoiceGuidanceService extends ChangeNotifier {
 
   Future<void> _speakLandmarkExploration(String landmark) async {
     final text = NavigationMessages.passingLandmark(landmark);
-    
+
     final accessibilityOn =
         SemanticsBinding.instance.semanticsEnabled ||
         WidgetsBinding.instance.platformDispatcher.accessibilityFeatures
@@ -382,14 +419,13 @@ class VoiceGuidanceService extends ChangeNotifier {
 
   /// Detener cualquier reproducción TTS en curso.
   Future<void> stopSpeaking() async {
-    await _enqueueVoiceTask(() async {
-      try {
-        await _tts.stop();
-        debugPrint('⏹️ TTS detenido');
-      } catch (e) {
-        debugPrint('Error deteniendo TTS: $e');
-      }
-    });
+    _voiceTaskGeneration++;
+    try {
+      await _tts.stop();
+      debugPrint('⏹️ TTS detenido');
+    } catch (e) {
+      debugPrint('Error deteniendo TTS: $e');
+    }
   }
 
   double getRemainingDistance(double currentLat, double currentLng) {
@@ -455,6 +491,8 @@ class VoiceGuidanceService extends ChangeNotifier {
       );
     _currentStepIndex = 0;
     _currentInstruction = _steps.isEmpty ? '' : _steps.first.instruction;
+    // Resetear contador de muestras fuera de ruta al reemplazar la ruta.
+    _consecutiveOffRouteSamples = 0;
   }
 
   RoutePoint? _currentNavigationPoint(RouteResult route) {
@@ -484,12 +522,11 @@ class VoiceGuidanceService extends ChangeNotifier {
   }) async {
     await _ensurePreferencesLoaded();
     await _initTts();
-    
-    // Detener modo exploración mientras navegamos
+
     if (_explorationModeEnabled) {
       _stopExplorationMode();
     }
-    
+
     await stopNavigation(speak: false);
 
     _locationService = locationService;
@@ -503,6 +540,7 @@ class VoiceGuidanceService extends ChangeNotifier {
 
     _lastAnnouncedLandmark = null;
     _lastLandmarkAt = DateTime.fromMillisecondsSinceEpoch(0);
+    _consecutiveOffRouteSamples = 0;
 
     final double? initialHeadingDegrees = skipInitialCalibration
       ? (_routeLegs.isNotEmpty ? _routeLegs.first.bearingDegrees : null)
@@ -540,10 +578,12 @@ class VoiceGuidanceService extends ChangeNotifier {
             .accessibleNavigation;
 
     if (accessibilityOn) {
+      // FIX: mensaje corregido — ya no menciona "mantén presionado"
       await _speakAndAnnounce(
         '${NavigationMessages.navigationStarted(destinationName)} '
-        'Toca una vez para repetir la instrucción. '
-        'Mantén presionado para cancelar la navegación.',
+        '${_steps.first.instruction} '
+        'Toca la pantalla para repetir la indicación. '
+        'Usa el botón Finalizar navegación para salir.',
       );
     } else {
       await _speakAndAnnounce(
@@ -600,6 +640,7 @@ class VoiceGuidanceService extends ChangeNotifier {
     _lastLandmarkAt = DateTime.fromMillisecondsSinceEpoch(0);
     _arrivalHandled = false;
     _arrivalHapticTriggered = false;
+    _consecutiveOffRouteSamples = 0;
 
     _locationService?.removeListener(_onLocationChanged);
     _locationService?.addListener(_onLocationChanged);
@@ -646,6 +687,7 @@ class VoiceGuidanceService extends ChangeNotifier {
     _initialCalibratedHeadingDegrees = null;
     _arrivalHandled = false;
     _arrivalHapticTriggered = false;
+    _consecutiveOffRouteSamples = 0;
 
     if (speak) {
       await _speakAndAnnounce(NavigationMessages.navigationStopped());
@@ -654,8 +696,7 @@ class VoiceGuidanceService extends ChangeNotifier {
     }
 
     notifyListeners();
-    
-    // Reiniciar modo exploración si estaba activo
+
     if (_explorationModeEnabled && !_isNavigating) {
       _startExplorationMode();
     }
@@ -687,8 +728,18 @@ class VoiceGuidanceService extends ChangeNotifier {
     _updateWalkingHeading(current);
     _syncStepIndexWithProgress(current.latitude, current.longitude);
 
+    // FIX recálculo falso: acumular muestras consecutivas fuera de ruta.
+    // Solo recalcular cuando hay suficientes muestras seguidas, lo que
+    // descarta spikes GPS puntuales que no representan una desviación real.
     if (_isFarFromRoute(current.latitude, current.longitude)) {
-      await _maybeReroute(current.latitude, current.longitude);
+      _consecutiveOffRouteSamples++;
+      if (_consecutiveOffRouteSamples >= _minOffRouteSamplesBeforeReroute) {
+        _consecutiveOffRouteSamples = 0;
+        await _maybeReroute(current.latitude, current.longitude);
+      }
+    } else {
+      // En ruta: resetear el contador
+      _consecutiveOffRouteSamples = 0;
     }
 
     if (_currentStepIndex >= _steps.length) return;
@@ -701,13 +752,36 @@ class VoiceGuidanceService extends ChangeNotifier {
       step.endPoint.longitude,
     );
 
+    if (distanceToStep <= 2.0) {
+      if (_currentStepIndex + 1 < _steps.length) {
+        _currentStepIndex++;
+        _currentInstruction = _steps[_currentStepIndex].instruction;
+        _commitHeadingOnTurnIfNeeded();
+        _movingReminderElapsed = Duration.zero;
+        notifyListeners();
+      }
+      return;
+    }
+
     if (distanceToStep <= step.triggerDistanceMeters) {
       _currentStepIndex++;
 
       if (_currentStepIndex >= _steps.length) {
         _currentStepIndex = _steps.length - 1;
-        _currentInstruction =
-            'Continúa hasta llegar a $_destinationName. Te avisaré al llegar.';
+
+        // FIX instrucción final estática: incluir distancia restante
+        // para que al tocar la pantalla el usuario sepa cuánto falta.
+        final remaining = getRemainingDistance(
+          current.latitude,
+          current.longitude,
+        );
+        final remainingText = remaining > 0
+            ? _formatDistance(remaining)
+            : '';
+        _currentInstruction = remainingText.isNotEmpty
+            ? 'Continúa recto. Faltan $remainingText para llegar a $_destinationName.'
+            : 'Continúa hasta llegar a $_destinationName. Te avisaré al llegar.';
+
         _status = 'Navegación activa hacia $_destinationName';
         notifyListeners();
         return;
@@ -732,16 +806,36 @@ class VoiceGuidanceService extends ChangeNotifier {
     final notAboutToTurn = distanceToStep > step.triggerDistanceMeters + 10;
 
     if (_landmarksEnabled && enoughTimeSinceLandmark && notAboutToTurn) {
+      final headingDegrees = mapReferenceHeadingDegrees;
       final landmark = _landmarkResolver?.call(
         current.latitude,
         current.longitude,
+        headingDegrees,
       );
-      if (landmark != null && landmark != _lastAnnouncedLandmark) {
-        _lastAnnouncedLandmark = landmark;
+      if (landmark != null && landmark.name != _lastAnnouncedLandmark) {
+        _lastAnnouncedLandmark = landmark.name;
         _lastLandmarkAt = now;
-        debugPrint('🗣️ LANDMARK (navegación): $landmark');
-        await _speakLandmark(NavigationMessages.passingLandmark(landmark));
+        debugPrint('🗣️ LANDMARK (navegación): ${landmark.name}');
+        await _speakLandmark(
+          NavigationMessages.passingLandmark(
+            landmark.name,
+            side: landmark.side,
+          ),
+        );
         return;
+      }
+    }
+    
+    if (_currentStepIndex == _steps.length - 1) {
+      final remaining = getRemainingDistance(
+        current.latitude,
+        current.longitude,
+      );
+      final remainingText = remaining > 0 ? _formatDistance(remaining) : '';
+      if (remainingText.isNotEmpty) {
+        _currentInstruction =
+            'Continúa recto. Faltan $remainingText para llegar a $_destinationName.';
+        notifyListeners();
       }
     }
 
@@ -768,6 +862,11 @@ class VoiceGuidanceService extends ChangeNotifier {
         ),
       );
     }
+  }
+
+  String _formatDistance(double meters) {
+    if (meters >= 1000) return '${(meters / 1000).toStringAsFixed(1)} kilómetros';
+    return '${meters.round()} metros';
   }
 
   Future<void> _completeArrival() async {
@@ -934,6 +1033,7 @@ class VoiceGuidanceService extends ChangeNotifier {
     );
     _latestWalkingHeadingDegrees = null;
     _committedHeadingDegrees = null;
+    _consecutiveOffRouteSamples = 0;
     notifyListeners();
 
     await _speakAndAnnounce(
@@ -1225,7 +1325,7 @@ class VoiceGuidanceService extends ChangeNotifier {
     try {
       HapticFeedback.lightImpact();
     } catch (_) {}
-    
+
     debugPrint('🔊 REPRODUCIENDO LANDMARK: $text');
     await _speakAndAnnounce(text);
   }
@@ -1244,9 +1344,6 @@ class VoiceGuidanceService extends ChangeNotifier {
 
         final accessibilityActive = semanticsOn || accessibleNavOn || _suppressTtsWhenAccessibilityActive;
 
-        // Si hay un lector de pantalla activo preferimos anunciar mediante
-        // el callback que nos suministró la UI (announceForTalkBack) o el
-        // announcer permanente, evitando así la duplicidad TTS + TalkBack.
         if (accessibilityActive) {
           if (_announceForTalkBack != null) {
             await _announceForTalkBack!.call(text);
@@ -1256,7 +1353,6 @@ class VoiceGuidanceService extends ChangeNotifier {
             await _permanentAnnouncer!.call(text);
             return;
           }
-          // Como último recurso, si no hay announcer disponible, usar TTS.
         }
 
         if (!_ttsReady) {
@@ -1273,8 +1369,12 @@ class VoiceGuidanceService extends ChangeNotifier {
   }
 
   Future<void> _enqueueVoiceTask(Future<void> Function() task) {
+    final generation = _voiceTaskGeneration;
     _voiceQueue = _voiceQueue
-        .then((_) => task())
+        .then((_) async {
+          if (generation != _voiceTaskGeneration) return;
+          await task();
+        })
         .catchError((_) {})
         .then((_) {});
     return _voiceQueue;
