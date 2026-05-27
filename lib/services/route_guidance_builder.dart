@@ -20,7 +20,7 @@ class RouteGuidanceBuilder {
     required double destinationLat,
     required double destinationLng,
     required String destinationName,
-    ({String name, String side})? Function(
+    String? Function(
       double lat,
       double lng,
       double? headingDegrees,
@@ -48,10 +48,9 @@ class RouteGuidanceBuilder {
         leg.bearingDegrees,
       );
 
-      final includeReference =
-          reference != null && reference.name != lastReference;
+      final includeReference = reference != null && reference != lastReference;
       if (reference != null) {
-        lastReference = reference.name;
+        lastReference = reference;
       }
 
       final instruction = _legInstruction(
@@ -155,7 +154,7 @@ class RouteGuidanceBuilder {
     required bool isFinalLeg,
     required double? initialHeadingDegrees,
     required bool includeReference,
-    required ({String name, String side})? reference,
+    required String? reference,
     required double destinationLat,
     required double destinationLng,
     required String destinationName,
@@ -191,31 +190,16 @@ class RouteGuidanceBuilder {
         destinationName: destinationName,
       );
       if (includeReference && reference != null) {
-        return '$baseInstruction $arrival. Pasarás junto a ${reference.name}${_referenceSideText(reference.side)}.';
+        return '$baseInstruction $arrival. Pasarás junto a $reference.';
       }
       return '$baseInstruction $arrival.';
     }
 
     if (includeReference && reference != null) {
-      return '$baseInstruction Pasarás junto a ${reference.name}${_referenceSideText(reference.side)}.';
+      return '$baseInstruction Pasarás junto a $reference.';
     }
 
     return baseInstruction;
-  }
-
-  static String _referenceSideText(String side) {
-    switch (side) {
-      case 'derecha':
-        return ' a tu derecha';
-      case 'izquierda':
-        return ' a tu izquierda';
-      case 'frente':
-        return ' al frente';
-      case 'detrás':
-        return ' detrás de ti';
-      default:
-        return '';
-    }
   }
 
   static String _initialOrientationInstruction({

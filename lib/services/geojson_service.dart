@@ -331,30 +331,6 @@ class GeoJsonService extends ChangeNotifier {
     return candidate?.label;
   }
 
-  ({String name, String side})? getNearestBlockReferenceWithSide(
-    double lat,
-    double lng,
-    double? headingDegrees, {
-    double maxDistanceMeters = 45,
-  }) {
-    final candidate = _nearestLandmarkCandidate(
-      lat,
-      lng,
-      maxDistanceMeters: maxDistanceMeters,
-    );
-    if (candidate == null) return null;
-
-    final side = _referenceSide(
-      userLat: lat,
-      userLng: lng,
-      targetLat: candidate.place.latitude,
-      targetLng: candidate.place.longitude,
-      headingDegrees: headingDegrees,
-    );
-
-    return (name: candidate.label, side: side);
-  }
-
   // Texto natural según categoría: "el Bloque 38", "la Portería Norte"
   String _landmarkLabel(CampusPlace place, String category) {
     switch (category) {
@@ -409,57 +385,4 @@ class GeoJsonService extends ChangeNotifier {
     return null;
   }
 
-  String _referenceSide({
-    required double userLat,
-    required double userLng,
-    required double targetLat,
-    required double targetLng,
-    required double? headingDegrees,
-  }) {
-    if (headingDegrees == null || headingDegrees.isNaN) return '';
-
-    final angleToTarget = _bearingDegrees(
-      userLat,
-      userLng,
-      targetLat,
-      targetLng,
-    );
-    final relativeAngle = _normalizeAngle(angleToTarget - headingDegrees);
-
-    if (relativeAngle >= 45 && relativeAngle <= 135) {
-      return 'derecha';
-    }
-    if (relativeAngle <= -45 && relativeAngle >= -135) {
-      return 'izquierda';
-    }
-    if (relativeAngle.abs() > 135) {
-      return 'detrás';
-    }
-    return 'frente';
-  }
-
-  double _bearingDegrees(
-    double lat1,
-    double lng1,
-    double lat2,
-    double lng2,
-  ) {
-    final radLat1 = _toRad(lat1);
-    final radLat2 = _toRad(lat2);
-    final dLon = _toRad(lng2 - lng1);
-    final y = sin(dLon) * cos(radLat2);
-    final x = cos(radLat1) * sin(radLat2) -
-        sin(radLat1) * cos(radLat2) * cos(dLon);
-    final bearing = atan2(y, x) * 180.0 / pi;
-    return (bearing + 360) % 360;
-  }
-
-  double _normalizeAngle(double angle) {
-    double a = angle;
-    while (a > 180) a -= 360;
-    while (a < -180) a += 360;
-    return a;
-  }
-
-  double _toRad(double deg) => deg * pi / 180.0;
 }

@@ -329,10 +329,9 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
         announceForTalkBack: _announce,
         landmarkResolver: (lat, lng, headingDegrees) => geoService == null
             ? null
-            : geoService.getNearestBlockReferenceWithSide(
+            : geoService.getNearestBlockReference(
                 lat,
                 lng,
-                headingDegrees,
               ),
         onArrival: _showArrivalOverlay,
         skipInitialCalibration: widget.autoStartSimulation,

@@ -275,10 +275,9 @@ class _MainScreenState extends State<MainScreen> {
         destinationLng: place.longitude,
         announceForTalkBack: _announce,
         landmarkResolver: (lat, lng, headingDegrees) =>
-            geo.getNearestBlockReferenceWithSide(
+            geo.getNearestBlockReference(
           lat,
           lng,
-          headingDegrees,
         ),
       );
 

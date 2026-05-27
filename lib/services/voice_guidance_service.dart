@@ -14,7 +14,7 @@ import 'geojson_service.dart';
 import 'haptic_service.dart';
 
 typedef VoiceAnnouncer = Future<void> Function(String message);
-typedef LandmarkResolver = ({String name, String side})? Function(
+typedef LandmarkResolver = String? Function(
   double lat,
   double lng,
   double? headingDegrees,
@@ -53,30 +53,8 @@ class NavigationMessages {
       'Vas correctamente por la ruta. Próxima indicación en $nextInstructionMeters metros. '
       'Faltan $remainingDistanceText para llegar a $destination.';
 
-  static String passingLandmark(
-    String landmark, {
-    String? side,
-  }) {
-    final sideText = _landmarkSideText(side);
-    return sideText.isEmpty
-        ? 'Estás pasando junto a $landmark.'
-        : 'Estás pasando junto a $landmark$sideText.';
-  }
-
-  static String _landmarkSideText(String? side) {
-    switch (side) {
-      case 'derecha':
-        return ', a tu derecha';
-      case 'izquierda':
-        return ', a tu izquierda';
-      case 'frente':
-        return ', al frente';
-      case 'detrás':
-        return ', detrás de ti';
-      default:
-        return '';
-    }
-  }
+  static String passingLandmark(String landmark) =>
+      'Estás pasando junto a $landmark.';
 
   static String noPointsForGuidance() =>
       'No hay suficientes puntos para guiar por voz.';
@@ -812,16 +790,11 @@ class VoiceGuidanceService extends ChangeNotifier {
         current.longitude,
         headingDegrees,
       );
-      if (landmark != null && landmark.name != _lastAnnouncedLandmark) {
-        _lastAnnouncedLandmark = landmark.name;
+      if (landmark != null && landmark != _lastAnnouncedLandmark) {
+        _lastAnnouncedLandmark = landmark;
         _lastLandmarkAt = now;
-        debugPrint('🗣️ LANDMARK (navegación): ${landmark.name}');
-        await _speakLandmark(
-          NavigationMessages.passingLandmark(
-            landmark.name,
-            side: landmark.side,
-          ),
-        );
+        debugPrint('🗣️ LANDMARK (navegación): $landmark');
+        await _speakLandmark(NavigationMessages.passingLandmark(landmark));
         return;
       }
     }
