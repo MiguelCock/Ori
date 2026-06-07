@@ -8,11 +8,11 @@ import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 
 import '../services/geojson_service.dart';
+import '../services/haptic_service.dart';
 import '../services/location_service.dart';
 import '../services/route_guidance_builder.dart';
-import '../services/routing_service.dart';
+import '../services/routing/routing.dart';
 import '../services/voice_guidance_service.dart';
-import '../services/haptic_service.dart';
 
 class NavigationMapScreen extends StatefulWidget {
   final String destinationName;
@@ -327,9 +327,7 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
         destinationLat: widget.destLat,
         destinationLng: widget.destLng,
         announceForTalkBack: _announce,
-        landmarkResolver: (lat, lng, headingDegrees) => geoService == null
-            ? null
-            : geoService.getNearestBlockReference(
+        landmarkResolver: (lat, lng, headingDegrees) => geoService?.getNearestBlockReference(
                 lat,
                 lng,
               ),

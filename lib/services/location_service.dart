@@ -95,7 +95,7 @@ class LocationService extends ChangeNotifier {
     try {
       if (_simulationMode) return;
       // Verificar si el GPS está habilitado
-      bool isLocationEnabled = await Geolocator.isLocationServiceEnabled();
+      final bool isLocationEnabled = await Geolocator.isLocationServiceEnabled();
       if (!isLocationEnabled) {
         _updateStatus(LocationStatus.disabled);
         await _announce(
@@ -154,7 +154,7 @@ class LocationService extends ChangeNotifier {
     _positionStream!.listen(_handlePositionUpdate, onError: _handleError);
 
     try {
-      Position initialPosition = await Geolocator.getCurrentPosition(
+      final Position initialPosition = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.bestForNavigation,
         timeLimit: const Duration(seconds: 15),
       );
@@ -176,7 +176,7 @@ class LocationService extends ChangeNotifier {
       return;
     }
 
-    LocationData newLocation = LocationData.fromPosition(position);
+    final LocationData newLocation = LocationData.fromPosition(position);
     final previousStatus = _status;
 
     final LocationStatus newStatus = position.accuracy <= 15.0

@@ -1,17 +1,18 @@
 import 'dart:async';
 import 'dart:math';
-import 'package:flutter/foundation.dart';
-import 'package:flutter_compass/flutter_compass.dart';
-import 'package:flutter/services.dart';
+
 import 'package:flutter/semantics.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
+import 'package:flutter_compass/flutter_compass.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'route_guidance_builder.dart';
-import 'location_service.dart';
-import 'routing_service.dart';
+
 import 'geojson_service.dart';
 import 'haptic_service.dart';
+import 'location_service.dart';
+import 'route_guidance_builder.dart';
+import 'routing/routing.dart';
 
 typedef VoiceAnnouncer = Future<void> Function(String message);
 typedef LandmarkResolver = String? Function(

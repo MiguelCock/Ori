@@ -1,5 +1,6 @@
-import 'package:flutter/semantics.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
+
 import '../models/campus_place.dart';
 
 class PlaceDetailScreen extends StatefulWidget {

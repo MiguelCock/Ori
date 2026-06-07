@@ -1,7 +1,8 @@
-import 'dart:math';
 import 'dart:convert';
-import 'package:flutter/services.dart';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
 import '../models/campus_place.dart';
 
 class GeoJsonService extends ChangeNotifier {
@@ -13,7 +14,7 @@ class GeoJsonService extends ChangeNotifier {
   List<CampusPlace> _filtered = [];
   Map<String, CategoryMeta> _categories = {};
   bool _isLoaded = false;
-  List<List<List<double>>> _campusPerimeters = [];
+  final List<List<List<double>>> _campusPerimeters = [];
 
   List<CampusPlace> get places => _filtered;
   List<CampusPlace> get allPlaces => _all;
@@ -215,7 +216,7 @@ class GeoJsonService extends ChangeNotifier {
     );
     if (categoryHasHint) return true;
 
-    return boundaryHints.any((hint) => name.contains(hint));
+    return boundaryHints.any(name.contains);
   }
 
   // Johan: área del polígono por fórmula de Shoelace

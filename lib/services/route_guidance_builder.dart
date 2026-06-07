@@ -1,6 +1,6 @@
 import 'dart:math';
 
-import 'routing_service.dart';
+import 'routing/routing.dart';
 
 class GuidanceStep {
   final RoutePoint endPoint;
@@ -281,8 +281,12 @@ class RouteGuidanceBuilder {
 
   static double _normalizeAngle(double angle) {
     double a = angle;
-    while (a > 180) a -= 360;
-    while (a < -180) a += 360;
+    while (a > 180) {
+      a -= 360;
+    }
+    while (a < -180) {
+      a += 360;
+    }
     return a;
   }
 

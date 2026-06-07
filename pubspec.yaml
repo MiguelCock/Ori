@@ -53,6 +53,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   flutter_map_mbtiles: ^1.0.4
   path_provider: ^2.1.5
+  graphs: ^2.3.2
 
 dev_dependencies:
   flutter_test:

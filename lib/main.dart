@@ -2,10 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
+
 import 'screens/home_screen.dart';
-import 'services/location_service.dart';
 import 'services/geojson_service.dart';
-import 'services/routing_service.dart';
+import 'services/location_service.dart';
+import 'services/routing/routing.dart';
 import 'services/voice_guidance_service.dart';
 
 void main() {

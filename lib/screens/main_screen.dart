@@ -1,14 +1,16 @@
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
-import '../services/location_service.dart';
-import '../services/geojson_service.dart';
-import '../services/routing_service.dart';
-import '../services/voice_guidance_service.dart';
+
 import '../models/campus_place.dart';
+import '../services/geojson_service.dart';
+import '../services/location_service.dart';
+import '../services/routing/routing.dart';
+import '../services/voice_guidance_service.dart';
 import '../utils/accessibility_scale.dart';
 import 'destination_screen.dart';
 import 'navigation_map_screen.dart';
@@ -405,7 +407,7 @@ class _MainScreenState extends State<MainScreen> {
                         horizontal: responsiveSpace(context, 16),
                       ),
                       child: Consumer<VoiceGuidanceService>(
-                        builder: (_, voice, __) {
+                        builder: (_, voice, _) {
                           final enabled = voice.explorationModeEnabled;
                           return Semantics(
                             button: true,
@@ -467,7 +469,7 @@ class _MainScreenState extends State<MainScreen> {
                         horizontal: responsiveSpace(context, 16),
                       ),
                       child: Consumer<GeoJsonService>(
-                        builder: (_, geo, __) {
+                        builder: (_, geo, _) {
                           final cats = geo.categories;
                           return LayoutBuilder(
                             builder: (context, constraints) {
@@ -525,7 +527,7 @@ class _NearbySection extends StatelessWidget {
   Widget build(BuildContext context) {
     final textScaler = clampedTextScaler(context);
     return Consumer2<LocationService, GeoJsonService>(
-      builder: (_, loc, geo, __) {
+      builder: (_, loc, geo, _) {
         if (loc.currentLocation == null || !geo.isLoaded) {
           return const SizedBox.shrink();
         }
@@ -541,9 +543,9 @@ class _NearbySection extends StatelessWidget {
             0,
           ),
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.05),
+            color: Colors.white.withValues(alpha: 0.05),
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.white.withOpacity(0.08)),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
             boxShadow: const [
               BoxShadow(
                 color: Color(0x33000000),
@@ -624,7 +626,7 @@ class _NearbySection extends StatelessWidget {
                               width: 48,
                               height: 48,
                               decoration: BoxDecoration(
-                                color: const Color(0xFF1565C0).withOpacity(0.2),
+                                color: const Color(0xFF1565C0).withValues(alpha: 0.2),
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: Icon(
@@ -653,7 +655,7 @@ class _NearbySection extends StatelessWidget {
                                 vertical: 4,
                               ),
                               decoration: BoxDecoration(
-                                color: const Color(0xFF1565C0).withOpacity(0.2),
+                                color: const Color(0xFF1565C0).withValues(alpha: 0.2),
                                 borderRadius: BorderRadius.circular(20),
                               ),
                               child: Text(
@@ -781,7 +783,7 @@ class _LocationHeaderState extends State<_LocationHeader> {
   Widget build(BuildContext context) {
     final textScaler = clampedTextScaler(context);
     return Consumer2<LocationService, GeoJsonService>(
-      builder: (_, loc, geo, __) {
+      builder: (_, loc, geo, _) {
         String title = 'Buscando ubicación...';
         String subtitle = '';
         bool showEafit = false;
@@ -832,7 +834,7 @@ class _LocationHeaderState extends State<_LocationHeader> {
               ),
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFF1565C0).withOpacity(0.35),
+                  color: const Color(0xFF1565C0).withValues(alpha: 0.35),
                   blurRadius: 16,
                   offset: const Offset(0, 6),
                 ),
@@ -916,10 +918,10 @@ class _LocationHeaderState extends State<_LocationHeader> {
                     width: 52,
                     height: 52,
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.12),
+                      color: Colors.white.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
-                        color: Colors.white.withOpacity(0.25),
+                        color: Colors.white.withValues(alpha: 0.25),
                         width: 1.5,
                       ),
                     ),

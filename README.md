@@ -97,3 +97,25 @@ Ori/
 - La app está configurada en español (`es_CO`).
 - El proyecto incluye recursos locales para mapas y rutas dentro de `assets/data`.
 - Se recomienda ejecutar pruebas y compilaciones antes de publicar una nueva versión.
+
+## Desarrollo
+
+
+### Conectar al celular
+
+Enable Developer Options on your phone.
+Enable USB debugging.
+Go to Developer Options → Wireless debugging and turn it on.
+Make sure your phone and PC are on the same Wi-Fi network.
+On your PC, run:
+adb pair IP_ADDRESS:PAIRING_PORT
+On your phone, tap Pair device with pairing code and enter the code shown on the phone.
+Then connect:
+adb connect IP_ADDRESS:ADB_PORT
+
+You can find the IP address and ports in the Wireless Debugging screen.
+
+Verify:
+adb devices
+
+You should see your phone listed as a network device.

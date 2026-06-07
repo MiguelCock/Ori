@@ -2,9 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+
+import '../models/campus_place.dart';
 import '../services/geojson_service.dart';
 import '../services/location_service.dart';
-import '../models/campus_place.dart';
 import 'place_detail_screen.dart';
 
 class DestinationScreen extends StatefulWidget {
@@ -314,7 +315,7 @@ class _PlaceList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Consumer2<GeoJsonService, LocationService>(
-      builder: (_, geo, loc, __) {
+      builder: (_, geo, loc, _) {
         if (!geo.isLoaded) {
           return const Center(
             child: CircularProgressIndicator(color: Color(0xFF1565C0)),
