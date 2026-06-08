@@ -7,7 +7,7 @@ import 'screens/home_screen.dart';
 import 'services/geojson_service.dart';
 import 'services/location_service.dart';
 import 'services/routing/routing.dart';
-import 'services/voice_guidance_service.dart';
+import 'services/voidce_guidance/voice_guidance.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();

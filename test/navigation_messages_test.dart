@@ -1,4 +1,4 @@
-import 'package:campus_guia/services/voice_guidance_service.dart';
+import 'package:campus_guia/services/voidce_guidance/voice_guidance.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

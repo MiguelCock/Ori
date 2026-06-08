@@ -12,7 +12,7 @@ import '../services/haptic_service.dart';
 import '../services/location_service.dart';
 import '../services/route_guidance_builder.dart';
 import '../services/routing/routing.dart';
-import '../services/voice_guidance_service.dart';
+import '../services/voidce_guidance/voice_guidance.dart';
 
 class NavigationMapScreen extends StatefulWidget {
   final String destinationName;

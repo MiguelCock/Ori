@@ -3,7 +3,7 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'main_screen.dart';
+import 'main_screen/main_screen.dart';
 import 'permission_screen.dart';
 import 'tutorial_screen.dart';
 import 'validation_screen.dart';

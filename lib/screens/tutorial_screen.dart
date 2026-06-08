@@ -25,7 +25,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../services/voice_guidance_service.dart';
+import '../services/voidce_guidance/voice_guidance.dart';
 import '../utils/accessibility_scale.dart';
 
 const String kTutorialCompletedPrefKey = 'tutorial_completed';
