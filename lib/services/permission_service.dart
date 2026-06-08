@@ -54,7 +54,7 @@ class PermissionService {
       final String result = await _channel.invokeMethod(
         'requestPermission',
         {'permission': permissionKey},
-      );
+      ) as String;
       return _buildResult(permission, result);
     } on PlatformException catch (e) {
       // Si el channel falla, se trata como denegado
@@ -79,7 +79,7 @@ class PermissionService {
       final String result = await _channel.invokeMethod(
         'checkPermission',
         {'permission': permissionKey},
-      );
+      ) as String;
       return _toStatus(result);
     } on PlatformException {
       return PermissionStatus.unknown;

@@ -92,7 +92,7 @@ class _ValidationScreenState extends State<ValidationScreen> {
         'Tu dispositivo es completamente compatible con CampusGuía. '
         'Continuando automáticamente.',
       );
-      await Future.delayed(const Duration(seconds: 2));
+      await Future<Duration>.delayed(const Duration(seconds: 2));
       if (mounted) widget.onValidationComplete();
     }
   }
@@ -133,7 +133,7 @@ class _ValidationScreenState extends State<ValidationScreen> {
   Future<bool> _checkTTS() async {
     try {
       final tts = FlutterTts();
-      final isLanguageAvailable = await tts.isLanguageAvailable('es-ES');
+      final isLanguageAvailable = await tts.isLanguageAvailable('es-ES') as bool;
       return isLanguageAvailable;
     } catch (e) {
       debugPrint('Error verificando TTS: $e');

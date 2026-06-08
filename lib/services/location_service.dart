@@ -209,7 +209,7 @@ class LocationService extends ChangeNotifier {
   }
 
   // Manejar errores del stream
-  void _handleError(error) {
+  void _handleError(String error) {
     if (_simulationMode) return;
     _lastError = 'Error en GPS: $error';
     _updateStatus(LocationStatus.noSignal);

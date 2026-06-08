@@ -146,7 +146,7 @@ class GeoJsonService extends ChangeNotifier {
     return const [];
   }
 
-  List<List<double>> _parseCoords(List raw) {
+  List<List<double>> _parseCoords(List<dynamic> raw) {
     return raw
         .map<List<double>>(
           (c) => [(c[0] as num).toDouble(), (c[1] as num).toDouble()],

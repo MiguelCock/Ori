@@ -47,7 +47,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!tutorialCompleted) {
       if (!mounted) return;
       await Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const TutorialScreen()),
+        MaterialPageRoute<TutorialScreen>(builder: (_) => const TutorialScreen()),
       );
     }
 
@@ -58,7 +58,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!validationCompleted) {
       if (!mounted) return;
       await Navigator.of(context).push(
-        MaterialPageRoute(
+        MaterialPageRoute<ValidationScreen>(
           builder: (_) => ValidationScreen(
             onValidationComplete: () async {
               await prefs.setBool('validation_completed', true);
@@ -82,7 +82,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (accepted) {
       // Saltar directo sin animación de bienvenida
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const MainScreen()),
+        MaterialPageRoute<MainScreen>(builder: (_) => const MainScreen()),
       );
     } else {
       setState(() => _checking = false);
@@ -109,7 +109,7 @@ class _HomeScreenState extends State<HomeScreen> {
     HapticFeedback.heavyImpact();
     _announce('Abriendo pantalla de permisos.');
     Navigator.of(context).push(
-      MaterialPageRoute(
+      MaterialPageRoute<PermissionScreen>(
         builder: (_) => PermissionScreen(
           onPermissionsHandled: () async {
             // Guardar que ya aceptó para que la próxima vez vaya directo
@@ -117,7 +117,7 @@ class _HomeScreenState extends State<HomeScreen> {
             await prefs.setBool(_prefKey, true);
             if (!mounted) return;
             Navigator.of(context).pushAndRemoveUntil(
-              MaterialPageRoute(builder: (_) => const MainScreen()),
+              MaterialPageRoute<MainScreen>(builder: (_) => const MainScreen()),
               (route) => false,
             );
             _announce('Permisos listos. Abriendo navegación.');
@@ -166,7 +166,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _replayTutorial() async {
     _announce('Abriendo tutorial.');
     await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const TutorialScreen()),
+      MaterialPageRoute<TutorialScreen>(builder: (_) => const TutorialScreen()),
     );
     if (!mounted) return;
     _mainButtonFocusNode.requestFocus();

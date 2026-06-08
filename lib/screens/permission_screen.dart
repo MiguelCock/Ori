@@ -7,7 +7,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
-import 'permission_service.dart';
+import '../services/permission_service.dart';
 
 enum _FlowState { explaining, requesting, done }
 
@@ -78,7 +78,7 @@ class _PermissionScreenState extends State<PermissionScreen> {
     if (!mounted) return;
     setState(() => _locationResult = locationResult);
     _announce(locationResult.message);
-    await Future.delayed(const Duration(milliseconds: 1500));
+    await Future<Duration>.delayed(const Duration(milliseconds: 1500));
 
     _announce('Solicitando permiso de micrófono.');
 
@@ -91,7 +91,7 @@ class _PermissionScreenState extends State<PermissionScreen> {
     });
     _announce(micResult.message);
 
-    await Future.delayed(const Duration(milliseconds: 1500));
+    await Future<Duration>.delayed(const Duration(milliseconds: 1500));
 
     final bool allGranted = locationResult.isGranted && micResult.isGranted;
     _announce(

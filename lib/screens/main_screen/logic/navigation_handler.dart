@@ -7,7 +7,7 @@ import '../../../services/geojson_service.dart';
 import '../../../services/location_service.dart';
 import '../../../services/routing/routing.dart';
 import '../../../services/voidce_guidance/voice_guidance.dart';
-import '../../navigation_map_screen.dart';
+import '../../navigation_map/navigation_map_screen.dart';
 
 /// Handles destination selection, route building, and navigation launch.
 /// Extracted from [_MainScreenState] to keep the screen widget focused on UI.
