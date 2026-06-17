@@ -556,10 +556,11 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
       displayedInstruction = _normalize(raw);
     }
 
-    return WillPopScope(
-      onWillPop: () async {
-        await _cancelNavigation();
-        return false;
+    return PopScope(
+      onPopInvokedWithResult: (bool didPop, dynamic result) async {
+        if (didPop) {
+          await _cancelNavigation();
+        }
       },
       child: Scaffold(
         backgroundColor: const Color(0xFF0D1B2A),

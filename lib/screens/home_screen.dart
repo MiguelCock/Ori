@@ -129,7 +129,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _onHelp() {
     HapticFeedback.mediumImpact();
-    showDialog(
+    showDialog<dynamic>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         backgroundColor: const Color(0xFF1A2A3A),

@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 
@@ -25,29 +27,29 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
     sections = info.keys.toList();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _announceSection();
+      _announceSection(WidgetsBinding.instance.renderViews.first.flutterView);
     });
   }
 
-  void _announceSection() {
+  void _announceSection(FlutterView view) {
     final key = sections[_sectionIndex];
     final value = info[key];
 
     final text = "$key: ${value is List ? value.join(', ') : value}";
-    SemanticsService.announce(text, TextDirection.ltr);
+    SemanticsService.sendAnnouncement(view, text, TextDirection.ltr);
   }
 
   void _nextSection() {
     if (_sectionIndex < sections.length - 1) {
       setState(() => _sectionIndex++);
-      _announceSection();
+      _announceSection(WidgetsBinding.instance.renderViews.first.flutterView);
     }
   }
 
   void _prevSection() {
     if (_sectionIndex > 0) {
       setState(() => _sectionIndex--);
-      _announceSection();
+      _announceSection(WidgetsBinding.instance.renderViews.first.flutterView);
     }
   }
 

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/semantics.dart';
 
 /// The upper panel of the navigation screen.
 /// Contains the back/cancel button, destination title (semantic), current

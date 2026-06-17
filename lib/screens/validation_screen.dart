@@ -146,7 +146,7 @@ class _ValidationScreenState extends State<ValidationScreen> {
     if (!_gpsAvailable) missingComponents += 'GPS. ';
     if (!_ttsAvailable) missingComponents += 'Voz (TTS). ';
 
-    showDialog(
+    showDialog<dynamic>(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) => AlertDialog(
