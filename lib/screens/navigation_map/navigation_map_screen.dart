@@ -290,8 +290,11 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
         isCancelled: () => !_routeSimulationRunning,
       );
     } finally {
-      if (mounted) setState(() => _routeSimulationRunning = false);
-      else _routeSimulationRunning = false;
+      if (mounted) {
+        setState(() => _routeSimulationRunning = false);
+      } else {
+        _routeSimulationRunning = false;
+      }
     }
   }
 
@@ -452,14 +455,12 @@ class _NavigationMapScreenState extends State<NavigationMapScreen> {
     if (!identical(_routingService, nextRouting)) {
       _routingService = nextRouting;
       // Rebuild RouteController whenever routing service changes.
-      if (nextRouting != null) {
-        _routeController = RouteController(
-          routing: nextRouting,
-          geoService: _geoService,
-          destination: _destination,
-          destinationPolygon: widget.destinationPolygon,
-        );
-      }
+      _routeController = RouteController(
+        routing: nextRouting,
+        geoService: _geoService,
+        destination: _destination,
+        destinationPolygon: widget.destinationPolygon,
+      );
     }
 
     final nextVoice =

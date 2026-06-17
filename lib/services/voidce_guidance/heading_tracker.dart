@@ -260,8 +260,12 @@ class HeadingTracker {
   }
 
   static double _normalizeAngle(double a) {
-    while (a > 180) a -= 360;
-    while (a < -180) a += 360;
+    while (a > 180) {
+      a -= 360;
+    }
+    while (a < -180) {
+      a += 360;
+    }
     return a;
   }
 

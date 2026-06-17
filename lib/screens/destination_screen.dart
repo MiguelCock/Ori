@@ -129,13 +129,6 @@ class _DestinationScreenState extends State<DestinationScreen> {
     widget.onDestinationSelected(place);
   }
 
-  void _confirm() {
-    // Método obsoleto: la selección abre directamente.
-    if (_selected == null) return;
-    HapticFeedback.heavyImpact();
-    widget.onDestinationSelected(_selected!);
-  }
-
   @override
   Widget build(BuildContext context) {
     // HU-19: textScaleFactor para detectar fuente grande del sistema

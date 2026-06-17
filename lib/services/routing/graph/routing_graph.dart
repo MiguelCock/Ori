@@ -1,11 +1,10 @@
 import 'dart:convert';
 
 import 'package:collection/collection.dart';
-
 import 'package:flutter/services.dart';
 
-import 'graph_node.dart';
 import '../routing/geometry.dart';
+import 'graph_node.dart';
 
 /// Loads the routing graph from assets and exposes a weighted A* search.
 ///

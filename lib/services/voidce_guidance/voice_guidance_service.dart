@@ -121,7 +121,7 @@ class VoiceGuidanceService extends ChangeNotifier {
 
   void setLocationService(LocationService service) {
     _exploration.locationService = service;
-    service.setAnnouncer((msg) => _tts.speak(msg));
+    service.setAnnouncer(_tts.speak);
     debugPrint('📍 VoiceGuidance: LocationService asignado');
   }
 
