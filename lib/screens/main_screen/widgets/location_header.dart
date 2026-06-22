@@ -208,7 +208,7 @@ class _LocationHeaderState extends State<LocationHeader> {
     final lat = loc.currentLocation!.latitude;
     final lng = loc.currentLocation!.longitude;
 
-    if (geo.isLoaded && geo.isInsideCampus(lat, lng)) {
+    if (geo.isDataLoaded && geo.isInsideCampus(lat, lng)) {
       final place = geo.getPlaceContaining(lat, lng);
       return (
         place?.name ?? 'Campus EAFIT',

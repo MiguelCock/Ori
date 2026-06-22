@@ -21,7 +21,7 @@ class NearbySection extends StatelessWidget {
   Widget build(BuildContext context) {
     return Consumer2<LocationService, GeoJsonService>(
       builder: (_, loc, geo, _) {
-        if (loc.currentLocation == null || !geo.isLoaded) {
+        if (loc.currentLocation == null || !geo.isDataLoaded) {
           return const SizedBox.shrink();
         }
 

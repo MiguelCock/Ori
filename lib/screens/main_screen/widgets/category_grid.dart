@@ -17,7 +17,7 @@ class CategoryGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     return Consumer<GeoJsonService>(
       builder: (_, geo, _) {
-        final cats = geo.categories;
+        final categories = geo.categories;
         return LayoutBuilder(
           builder: (context, constraints) {
             final width = constraints.maxWidth;
@@ -34,10 +34,10 @@ class CategoryGrid extends StatelessWidget {
               spacing: spacing,
               runSpacing: spacing,
               children: [
-                for (final cat in cats)
+                for (final category in categories)
                   SizedBox(
                     width: itemWidth,
-                    child: CategoryButton(cat: cat, onTap: onCategoryTap),
+                    child: CategoryButton(category: category, onTap: onCategoryTap),
                   ),
               ],
             );

@@ -50,7 +50,7 @@ class ExplorationService {
     if (loc == null) return;
 
     final geoJson = geoJsonService;
-    if (geoJson == null || !geoJson.isLoaded) return;
+    if (geoJson == null || !geoJson.isDataLoaded) return;
 
     final now = DateTime.now();
     if (now.difference(_lastAnnouncedAt) < _minTimeBetweenAnnouncements) return;

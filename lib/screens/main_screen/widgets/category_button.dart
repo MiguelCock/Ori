@@ -3,14 +3,14 @@ import 'package:flutter/material.dart';
 import '../../../models/campus_place.dart';
 import '../../../utils/accessibility_scale.dart';
 
-/// A single tappable tile in the category grid.
+/// A single tappable tile in the categoryegory grid.
 class CategoryButton extends StatelessWidget {
-  final CategoryMeta cat;
+  final CategoryMeta category;
   final void Function(CategoryMeta) onTap;
 
   const CategoryButton({
     super.key,
-    required this.cat,
+    required this.category,
     required this.onTap,
   });
 
@@ -20,15 +20,15 @@ class CategoryButton extends StatelessWidget {
 
     return Semantics(
       button: true,
-      label: cat.label,
+      label: category.label,
       hint: 'Toca dos veces para explorar lugares',
-      onTap: () => onTap(cat),
+      onTap: () => onTap(category),
       child: ExcludeSemantics(
         child: Material(
           color: Colors.transparent,
           borderRadius: BorderRadius.circular(16),
           child: InkWell(
-            onTap: () => onTap(cat),
+            onTap: () => onTap(category),
             borderRadius: BorderRadius.circular(16),
             splashColor: const Color(0xFF1565C0).withValues(alpha: 0.28),
             highlightColor: const Color(0xFF1565C0).withValues(alpha: 0.14),
@@ -67,14 +67,14 @@ class CategoryButton extends StatelessWidget {
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Icon(
-                          cat.iconData,
+                          category.iconData,
                           color: const Color(0xFF82B1FF),
                           size: 22,
                         ),
                       ),
                       const SizedBox(height: 7),
                       Text(
-                        cat.label,
+                        category.label,
                         textScaler: textScaler,
                         style: const TextStyle(
                           color: Colors.white,

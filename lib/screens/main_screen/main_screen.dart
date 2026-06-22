@@ -67,7 +67,7 @@ class _MainScreenState extends State<MainScreen>
     final loc = Provider.of<LocationService>(context, listen: false);
     geo.filterByCategory(cat.id);
 
-    Navigator.of(context).push(MaterialPageRoute(
+    Navigator.of(context).push(MaterialPageRoute<dynamic>(
       builder: (_) => MultiProvider(
         providers: [
           ChangeNotifierProvider.value(value: geo),
@@ -99,7 +99,7 @@ class _MainScreenState extends State<MainScreen>
     final here = loc.currentLocation!;
     geo.filterByProximity(here.latitude, here.longitude, limit: 10);
 
-    Navigator.of(context).push(MaterialPageRoute(
+    Navigator.of(context).push(MaterialPageRoute<dynamic>(
       builder: (_) => MultiProvider(
         providers: [
           ChangeNotifierProvider.value(value: geo),
@@ -163,10 +163,10 @@ class _MainScreenState extends State<MainScreen>
   }
 
   Widget _divider() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
+    return const Padding(
+      padding: EdgeInsets.fromLTRB(20, 24, 20, 0),
       child: Row(
-        children: const [
+        children: [
           Expanded(child: Divider(color: Colors.white12, thickness: 1)),
           ExcludeSemantics(
             child: Padding(

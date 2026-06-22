@@ -66,9 +66,9 @@ class _DestinationScreenState extends State<DestinationScreen> {
   Future<void> _announceOptionsIfReady() async {
     if (!mounted || _didAnnounceOptions) return;
     final geo = _geo;
-    if (geo == null || !geo.isLoaded) return;
+    if (geo == null || !geo.isDataLoaded) return;
 
-    final places = geo.places;
+    final places = geo.filteredPlaces;
     if (places.isEmpty) {
       _didAnnounceOptions = true;
       await _announce('No hay opciones disponibles en ${widget.categoryName}.');
@@ -309,13 +309,13 @@ class _PlaceList extends StatelessWidget {
   Widget build(BuildContext context) {
     return Consumer2<GeoJsonService, LocationService>(
       builder: (_, geo, loc, _) {
-        if (!geo.isLoaded) {
+        if (!geo.isDataLoaded) {
           return const Center(
             child: CircularProgressIndicator(color: Color(0xFF1565C0)),
           );
         }
 
-        final places = geo.places;
+        final places = geo.filteredPlaces;
 
         if (places.isEmpty) {
           return Semantics(

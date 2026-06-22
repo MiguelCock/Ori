@@ -40,7 +40,7 @@ mixin NavigationHandlerMixin<T extends StatefulWidget> on State<T> {
       return;
     }
 
-    if (!geo.isLoaded) await geo.load();
+    if (!geo.isDataLoaded) await geo.load();
 
     final origin = location.currentLocation!;
 
